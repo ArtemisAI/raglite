@@ -46,23 +46,105 @@ def vector_search(
     # Rank the chunks by relevance according to the L∞ norm of the similarities of the multi-vector
     # chunk embeddings to the query embedding with a single query.
     with Session(create_database_engine(config)) as session:
-        corrected_oversample = oversample * config.chunk_max_size / RAGLiteConfig.chunk_max_size
-        num_hits = round(corrected_oversample) * max(num_results, 10)
-        dist = ChunkEmbedding.embedding.distance(  # type: ignore[attr-defined]
-            query_embedding, metric=config.vector_search_distance_metric
-        ).label("dist")
-        sim = (1.0 - dist).label("sim")
-        top_vectors = select(ChunkEmbedding.chunk_id, sim).order_by(dist).limit(num_hits).subquery()
-        sim_norm = func.max(top_vectors.c.sim).label("sim_norm")
-        statement = (
-            select(top_vectors.c.chunk_id, sim_norm)
-            .group_by(top_vectors.c.chunk_id)
-            .order_by(sim_norm.desc())
-            .limit(num_results)
-        )
-        rows = session.exec(statement).all()
-        chunk_ids = [row[0] for row in rows]
-        similarity = [float(row[1]) for row in rows]
+        dialect = session.get_bind().dialect.name
+        
+        if dialect == "sqlite":
+            # Use sqlite-vec for vector search with fallback to PyNNDescent
+            engine = session.get_bind()
+            if getattr(engine, 'sqlite_vec_available', False):
+                # Use sqlite-vec for efficient vector search
+                try:
+                    import sqlite_vec
+                    
+                    # Ensure query_embedding is float32 and serialize it
+                    query_embedding_f32 = query_embedding.astype(np.float32)
+                    query_vector_bytes = sqlite_vec.serialize_float32(query_embedding_f32)
+                    
+                    # Get distance metric function name
+                    metric_map = {
+                        "cosine": "vec_distance_cosine",
+                        "dot": "vec_distance_dot", 
+                        "l2": "vec_distance_l2"
+                    }
+                    distance_func = metric_map.get(config.vector_search_distance_metric, "vec_distance_cosine")
+                    
+                    statement = text(f"""
+                        SELECT chunk_id, (1.0 - {distance_func}(embedding, ?)) as similarity
+                        FROM chunk_embeddings_vec 
+                        ORDER BY {distance_func}(embedding, ?) ASC
+                        LIMIT ?
+                    """)
+                    
+                    rows = session.execute(
+                        statement, 
+                        [query_vector_bytes, query_vector_bytes, num_results]
+                    ).fetchall()
+                    
+                    chunk_ids = [row[0] for row in rows]
+                    similarity = [float(row[1]) for row in rows]
+                    return chunk_ids, similarity
+                    
+                except Exception as e:
+                    # Log the error but continue with fallback
+                    import logging
+                    logging.warning(f"sqlite-vec search failed: {e}, falling back to PyNNDescent")
+            
+            # Fallback to PyNNDescent for vector search
+            try:
+                import pynndescent
+                
+                # Get all embeddings from the database
+                embedding_rows = session.execute(text("""
+                    SELECT chunk_id, embedding FROM chunk_embedding
+                """)).fetchall()
+                
+                if not embedding_rows:
+                    return [], []
+                
+                chunk_ids_all = [row[0] for row in embedding_rows]
+                embeddings_all = np.array([row[1] for row in embedding_rows])
+                
+                # Build PyNNDescent index
+                metric = "cosine" if config.vector_search_distance_metric == "cosine" else "euclidean"
+                index = pynndescent.NNDescent(embeddings_all, metric=metric)
+                
+                # Search for nearest neighbors
+                indices, distances = index.query([query_embedding], k=min(num_results, len(chunk_ids_all)))
+                
+                # Convert to chunk IDs and similarities
+                chunk_ids = [chunk_ids_all[i] for i in indices[0]]
+                if config.vector_search_distance_metric == "cosine":
+                    similarity = [1.0 - d for d in distances[0]]  # Convert distance to similarity
+                else:
+                    similarity = [1.0 / (1.0 + d) for d in distances[0]]  # Convert distance to similarity
+                
+                return chunk_ids, similarity
+                
+            except Exception as e:
+                # Final fallback: return empty results
+                import logging
+                logging.warning(f"Vector search fallback failed: {e}")
+                return [], []
+        else:
+            # Use existing SQLModel ORM approach for PostgreSQL and DuckDB
+            corrected_oversample = oversample * config.chunk_max_size / RAGLiteConfig.chunk_max_size
+            num_hits = round(corrected_oversample) * max(num_results, 10)
+            dist = ChunkEmbedding.embedding.distance(  # type: ignore[attr-defined]
+                query_embedding, metric=config.vector_search_distance_metric
+            ).label("dist")
+            sim = (1.0 - dist).label("sim")
+            top_vectors = select(ChunkEmbedding.chunk_id, sim).order_by(dist).limit(num_hits).subquery()
+            sim_norm = func.max(top_vectors.c.sim).label("sim_norm")
+            statement = (
+                select(top_vectors.c.chunk_id, sim_norm)
+                .group_by(top_vectors.c.chunk_id)
+                .order_by(sim_norm.desc())
+                .limit(num_results)
+            )
+            rows = session.exec(statement).all()
+            chunk_ids = [row[0] for row in rows]
+            similarity = [float(row[1]) for row in rows]
+            
     return chunk_ids, similarity
 
 
@@ -106,16 +188,29 @@ def keyword_search(
         elif dialect == "sqlite":
             # Use FTS5 for keyword search in SQLite
             try:
-                statement = text("""
-                    SELECT chunk.id as chunk_id, bm25(chunk_fts) as score
-                    FROM chunk_fts 
-                    JOIN chunk ON chunk.id = chunk_fts.rowid
-                    WHERE chunk_fts MATCH :query
-                    ORDER BY score
-                    LIMIT :limit
-                """)
-                results = session.execute(statement, params={"query": query, "limit": num_results})
-            except Exception:
+                # Escape special FTS5 characters and prepare query
+                import re
+                # Remove/escape FTS5 special characters to avoid syntax errors
+                query_escaped = re.sub(r'[^\w\s]', ' ', query)
+                query_escaped = ' '.join(query_escaped.split())  # normalize whitespace
+                
+                if query_escaped.strip():
+                    statement = text("""
+                        SELECT chunk_fts.chunk_id as chunk_id, bm25(chunk_fts) as score
+                        FROM chunk_fts 
+                        WHERE chunk_fts MATCH :query
+                        ORDER BY bm25(chunk_fts)
+                        LIMIT :limit
+                    """)
+                    results = session.execute(statement, params={"query": query_escaped, "limit": num_results})
+                else:
+                    # Empty query after escaping, return empty results
+                    results = []
+            except Exception as e:
+                # Log the FTS5 error for debugging
+                import logging
+                logging.warning(f"FTS5 search failed: {e}, falling back to LIKE search")
+                
                 # Fallback to simple LIKE search if FTS5 is not available
                 statement = text("""
                     SELECT id as chunk_id, 1.0 as score
