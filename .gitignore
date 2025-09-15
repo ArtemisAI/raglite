@@ -62,6 +62,7 @@ __pycache__/
 *.egg-info/
 *.py[cdo]
 .venv/
+venv/
 dist/
 
 # RAGLite

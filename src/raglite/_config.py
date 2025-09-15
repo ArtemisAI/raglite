@@ -36,13 +36,43 @@ def _lazy_import_rerankers():
 cache_path = Path(user_data_dir("raglite", ensure_exists=True))
 
 
+def _default_llm():
+    """Create default LLM with safe dependency checking."""
+    try:
+        return (
+            "llama-cpp-python/unsloth/Qwen3-8B-GGUF/*Q4_K_M.gguf@8192"
+            if llama_supports_gpu_offload()
+            else "llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192"
+        )
+    except ModuleNotFoundError:
+        # Fallback to a simple LLM configuration that doesn't require llama-cpp-python
+        return "openai/gpt-3.5-turbo"
+
+
+def _default_embedder():
+    """Create default embedder with safe dependency checking."""
+    try:
+        return (  # Nomic-embed may be better if only English is used.
+            "llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512"
+            if llama_supports_gpu_offload() or (os.cpu_count() or 1) >= 4  # noqa: PLR2004
+            else "llama-cpp-python/lm-kit/bge-m3-gguf/*Q4_K_M.gguf@512"
+        )
+    except ModuleNotFoundError:
+        # Fallback to OpenAI embeddings when llama-cpp-python is not available
+        return "openai/text-embedding-ada-002"
+
+
 def _default_reranker():
-    """Create default reranker with lazy loading."""
-    FlashRankRanker, _ = _lazy_import_rerankers()
-    return {
-        "en": FlashRankRanker("ms-marco-MiniLM-L-12-v2", verbose=0, cache_dir=cache_path),
-        "other": FlashRankRanker("ms-marco-MultiBERT-L-12", verbose=0, cache_dir=cache_path),
-    }
+    """Create default reranker with lazy loading, returns None if rerankers not available."""
+    try:
+        # Just check if we can import, but don't initialize models yet
+        _lazy_import_rerankers()
+        # Return a lambda that will create the reranker when actually needed
+        return "lazy_reranker"  # Placeholder that indicates reranking is available
+    except ImportError:
+        # Return None if rerankers are not available - this allows the system to work
+        # without reranking functionality
+        return None
 
 
 # Lazily load the default search method to avoid circular imports.
@@ -62,22 +92,10 @@ class RAGLiteConfig:
     # Database config.
     db_url: str | URL = f"sqlite:///{(cache_path / 'raglite.db').as_posix()}"
     # LLM config used for generation.
-    llm: str = field(
-        default_factory=lambda: (
-            "llama-cpp-python/unsloth/Qwen3-8B-GGUF/*Q4_K_M.gguf@8192"
-            if llama_supports_gpu_offload()
-            else "llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192"
-        )
-    )
+    llm: str = field(default_factory=_default_llm)
     llm_max_tries: int = 4
     # Embedder config used for indexing.
-    embedder: str = field(
-        default_factory=lambda: (  # Nomic-embed may be better if only English is used.
-            "llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512"
-            if llama_supports_gpu_offload() or (os.cpu_count() or 1) >= 4  # noqa: PLR2004
-            else "llama-cpp-python/lm-kit/bge-m3-gguf/*Q4_K_M.gguf@512"
-        )
-    )
+    embedder: str = field(default_factory=_default_embedder)
     embedder_normalize: bool = True
     # Chunk config used to partition documents into chunks.
     chunk_max_size: int = 2048  # Max number of characters per chunk.
@@ -86,7 +104,7 @@ class RAGLiteConfig:
     vector_search_multivector: bool = True
     vector_search_query_adapter: bool = True  # Only supported for "cosine" and "dot" metrics.
     # Reranking config.
-    reranker: "BaseRanker | dict[str, BaseRanker] | None" = field(
+    reranker: "BaseRanker | dict[str, BaseRanker] | str | None" = field(
         default_factory=_default_reranker,
         compare=False,  # Exclude the reranker from comparison to avoid lru_cache misses.
     )

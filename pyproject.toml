@@ -26,9 +26,6 @@ dependencies = [
   "huggingface-hub (>=0.31.2)",
   "litellm (>=1.60.2)",
   "pydantic (>=2.7.0)",
-  # Reranking:
-  "langdetect (>=1.0.9)",
-  "rerankers[api,flashrank] (>=0.10.0)",
   # Storage:
   "duckdb (>=1.1.3)",
   "duckdb-engine (>=0.16.0)",
@@ -82,6 +79,11 @@ chainlit = ["chainlit (>=2.0.0)"]
 llama-cpp-python = ["llama-cpp-python (>=0.3.9)"]
 # Markdown conversion:
 pandoc = ["pypandoc-binary (>=1.13)"]
+# Reranking:
+rerank = [
+  "langdetect (>=1.0.9)",
+  "rerankers[api,flashrank] (>=0.10.0)",
+]
 # Evaluation:
 ragas = ["pandas (>=2.1.1)", "ragas (>=0.1.12)"]
 # Benchmarking:
