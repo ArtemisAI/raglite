@@ -209,7 +209,7 @@ class DuckDBSingleVec(UserDefinedType[FloatVector]):
 
 
 class SQLiteVec(UserDefinedType[FloatVector]):
-    """A SQLite vector column type for SQLAlchemy using sqlite-vec."""
+    """A SQLite vector column type for SQLAlchemy using JSON serialization."""
 
     cache_ok = True
 
@@ -218,25 +218,36 @@ class SQLiteVec(UserDefinedType[FloatVector]):
         self.dim = dim
 
     def get_col_spec(self, **kwargs: Any) -> str:
-        return f"FLOAT[{self.dim}]" if self.dim is not None else "FLOAT[]"
+        # Use TEXT column to store JSON-serialized embeddings in SQLite
+        return "TEXT"
 
     def bind_processor(
         self, dialect: Dialect
-    ) -> Callable[[FloatVector | None], list[float] | None]:
-        """Process NumPy ndarray to SQLite vector format for bound parameters."""
+    ) -> Callable[[FloatVector | None], str | None]:
+        """Process NumPy ndarray to JSON string for SQLite storage."""
+        import json
 
-        def process(value: FloatVector | None) -> list[float] | None:
-            return np.ravel(value).tolist() if value is not None else None
+        def process(value: FloatVector | None) -> str | None:
+            if value is None:
+                return None
+            # Convert to list and serialize as JSON
+            embedding_list = np.ravel(value).tolist()
+            return json.dumps(embedding_list)
 
         return process
 
     def result_processor(
         self, dialect: Dialect, coltype: Any
-    ) -> Callable[[list[float] | None], FloatVector | None]:
-        """Process SQLite vector format to NumPy ndarray."""
+    ) -> Callable[[str | None], FloatVector | None]:
+        """Process JSON string to NumPy ndarray."""
+        import json
 
-        def process(value: list[float] | None) -> FloatVector | None:
-            return np.asarray(value, dtype=np.float32) if value is not None else None
+        def process(value: str | None) -> FloatVector | None:
+            if value is None:
+                return None
+            # Deserialize JSON and convert to numpy array
+            embedding_list = json.loads(value)
+            return np.asarray(embedding_list, dtype=np.float32)
 
         return process
 

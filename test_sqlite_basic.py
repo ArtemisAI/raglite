@@ -29,11 +29,12 @@ def test_sqlite_basic():
         
         # Test basic connection
         with engine.connect() as conn:
-            result = conn.execute('SELECT 1 as test')
+            from sqlalchemy import text
+            result = conn.execute(text('SELECT 1 as test'))
             print(f'✅ Database connection works: {result.fetchone()}')
             
             # Check if tables were created
-            query = "SELECT name FROM sqlite_master WHERE type='table'"
+            query = text("SELECT name FROM sqlite_master WHERE type='table'")
             result = conn.execute(query)
             tables = [row[0] for row in result.fetchall()]
             print(f'✅ Tables created: {tables}')

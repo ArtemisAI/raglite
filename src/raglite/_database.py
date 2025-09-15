@@ -678,35 +678,8 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
                 import logging
                 logging.warning(f"Could not create FTS5 index: {e}. Keyword search will not be available.")
             
-            # Create virtual table for vector search using sqlite-vec
-            try:
-                session.execute(text(f"""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings_vec 
-                    USING vec0(
-                        chunk_id TEXT PRIMARY KEY,
-                        embedding FLOAT[{embedding_dim}]
-                    )
-                """))
-                
-                # Populate vector table with existing embeddings
-                num_embeddings = session.execute(text("SELECT COUNT(*) FROM chunk_embedding")).scalar_one()
-                if num_embeddings > 0:
-                    try:
-                        num_indexed_embeddings = session.execute(
-                            text("SELECT COUNT(*) FROM chunk_embeddings_vec")
-                        ).scalar_one()
-                    except Exception:
-                        num_indexed_embeddings = 0
-                        
-                    if num_indexed_embeddings != num_embeddings:
-                        session.execute(text("DELETE FROM chunk_embeddings_vec"))
-                        # Note: Need to implement proper embedding serialization
-                        # This will be handled in the insertion pipeline
-                        
-            except Exception as e:
-                # sqlite-vec extension might not be available, log warning but continue
-                import logging
-                logging.warning(f"Could not create vector index: {e}. Vector search will not be available.")
+            # Note: Vector embeddings are now stored as JSON in the regular chunk_embedding table
+            # using the updated SQLiteVec column type. No separate virtual table needed.
             
             session.commit()
     return engine

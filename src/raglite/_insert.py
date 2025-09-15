@@ -188,26 +188,17 @@ def insert_documents(  # noqa: C901
             session.commit()
             session.execute(text("CHECKPOINT;"))
         elif engine.dialect.name == "sqlite":
-            # Update FTS5 index for SQLite and rebuild/refresh vector index if needed
+            # Update FTS5 index for SQLite 
             try:
                 # For FTS5, insert or update chunk content
                 for doc, chunks, _ in all_results:
                     for chunk in chunks:
                         session.execute(text("""
-                            INSERT OR REPLACE INTO chunk_fts (id, body)
-                            VALUES (:id, :body)
-                        """), {"id": chunk.id, "body": chunk.body})
-                
-                # For vector table, insert embeddings
-                for doc, chunks, chunk_embeddings_list in all_results:
-                    for chunk_embeddings in chunk_embeddings_list:
-                        for chunk_embedding in chunk_embeddings:
-                            session.execute(text("""
-                                INSERT OR REPLACE INTO chunk_embeddings_vec (id, embedding)
-                                VALUES (:id, :embedding)
-                            """), {"id": chunk_embedding.chunk_id, "embedding": chunk_embedding.embedding.tolist()})
+                            INSERT OR REPLACE INTO chunk_fts (chunk_id, body)
+                            VALUES (:chunk_id, :body)
+                        """), {"chunk_id": chunk.id, "body": chunk.body})
                 
                 session.commit()
             except Exception:
-                # If FTS5 or vector tables don't exist, continue silently
+                # If FTS5 table doesn't exist, continue silently
                 pass

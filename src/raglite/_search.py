@@ -49,51 +49,18 @@ def vector_search(
         dialect = session.get_bind().dialect.name
         
         if dialect == "sqlite":
-            # Use sqlite-vec for vector search with fallback to PyNNDescent
+            # SQLite vector search with JSON-serialized embeddings
             engine = session.get_bind()
-            if getattr(engine, 'sqlite_vec_available', False):
-                # Use sqlite-vec for efficient vector search
-                try:
-                    import sqlite_vec
-                    
-                    # Ensure query_embedding is float32 and serialize it
-                    query_embedding_f32 = query_embedding.astype(np.float32)
-                    query_vector_bytes = sqlite_vec.serialize_float32(query_embedding_f32)
-                    
-                    # Get distance metric function name
-                    metric_map = {
-                        "cosine": "vec_distance_cosine",
-                        "dot": "vec_distance_dot", 
-                        "l2": "vec_distance_l2"
-                    }
-                    distance_func = metric_map.get(config.vector_search_distance_metric, "vec_distance_cosine")
-                    
-                    statement = text(f"""
-                        SELECT chunk_id, (1.0 - {distance_func}(embedding, ?)) as similarity
-                        FROM chunk_embeddings_vec 
-                        ORDER BY {distance_func}(embedding, ?) ASC
-                        LIMIT ?
-                    """)
-                    
-                    rows = session.execute(
-                        statement, 
-                        [query_vector_bytes, query_vector_bytes, num_results]
-                    ).fetchall()
-                    
-                    chunk_ids = [row[0] for row in rows]
-                    similarity = [float(row[1]) for row in rows]
-                    return chunk_ids, similarity
-                    
-                except Exception as e:
-                    # Log the error but continue with fallback
-                    import logging
-                    logging.warning(f"sqlite-vec search failed: {e}, falling back to PyNNDescent")
             
-            # Fallback to PyNNDescent for vector search
+            # Always use PyNNDescent for now since we're using JSON storage
+            # TODO: In the future, we could implement a hybrid approach where
+            # we maintain both JSON storage (for ORM compatibility) and 
+            # sqlite-vec tables (for performance)
             try:
                 import pynndescent
+                import json
                 
-                # Get all embeddings from the database
+                # Get all embeddings from the database (JSON format)
                 embedding_rows = session.execute(text("""
                     SELECT chunk_id, embedding FROM chunk_embedding
                 """)).fetchall()
@@ -102,11 +69,31 @@ def vector_search(
                     return [], []
                 
                 chunk_ids_all = [row[0] for row in embedding_rows]
-                embeddings_all = np.array([row[1] for row in embedding_rows])
+                embeddings_all = []
+                
+                # Deserialize JSON embeddings
+                for chunk_id, embedding_json in embedding_rows:
+                    try:
+                        if isinstance(embedding_json, str):
+                            # JSON-serialized embedding
+                            embedding_list = json.loads(embedding_json)
+                        else:
+                            # Already a list (shouldn't happen but handle gracefully)
+                            embedding_list = embedding_json
+                        embeddings_all.append(embedding_list)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        import logging
+                        logging.warning(f"Failed to deserialize embedding for chunk {chunk_id}: {e}")
+                        continue
+                
+                if not embeddings_all:
+                    return [], []
+                
+                embeddings_array = np.array(embeddings_all, dtype=np.float32)
                 
                 # Build PyNNDescent index
                 metric = "cosine" if config.vector_search_distance_metric == "cosine" else "euclidean"
-                index = pynndescent.NNDescent(embeddings_all, metric=metric)
+                index = pynndescent.NNDescent(embeddings_array, metric=metric)
                 
                 # Search for nearest neighbors
                 indices, distances = index.query([query_embedding], k=min(num_results, len(chunk_ids_all)))
@@ -123,7 +110,7 @@ def vector_search(
             except Exception as e:
                 # Final fallback: return empty results
                 import logging
-                logging.warning(f"Vector search fallback failed: {e}")
+                logging.warning(f"SQLite vector search failed: {e}")
                 return [], []
         else:
             # Use existing SQLModel ORM approach for PostgreSQL and DuckDB
