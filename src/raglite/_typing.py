@@ -123,14 +123,17 @@ def _embedding_distance_duckdb(element: EmbeddingDistance, compiler: Any, **kwar
 
 @compiles(EmbeddingDistance, "sqlite")
 def _embedding_distance_sqlite(element: EmbeddingDistance, compiler: Any, **kwargs: Any) -> str:
-    """Compile embedding distance for SQLite using sqlite-vec."""
+    """Compile embedding distance for SQLite with JSON serialization support."""
+    # For SQLite with JSON-serialized embeddings, we need a custom distance function
+    # This will be handled by the search implementation layer
     func_map: dict[DistanceMetric, str] = {
-        "cosine": "vec_distance_cosine",
-        "dot": "vec_distance_dot", 
-        "l2": "vec_distance_l2",
+        "cosine": "sqlite_vec_distance_cosine",
+        "dot": "sqlite_vec_distance_dot", 
+        "l2": "sqlite_vec_distance_l2",
     }
     left, right = list(element.clauses)
     func_name = func_map[element.metric]
+    # Note: This requires custom SQL functions to be registered
     return f"{func_name}({compiler.process(left)}, {compiler.process(right)})"
 
 
@@ -209,7 +212,7 @@ class DuckDBSingleVec(UserDefinedType[FloatVector]):
 
 
 class SQLiteVec(UserDefinedType[FloatVector]):
-    """A SQLite vector column type for SQLAlchemy using sqlite-vec."""
+    """A SQLite vector column type for SQLAlchemy using sqlite-vec or JSON serialization."""
 
     cache_ok = True
 
@@ -218,25 +221,36 @@ class SQLiteVec(UserDefinedType[FloatVector]):
         self.dim = dim
 
     def get_col_spec(self, **kwargs: Any) -> str:
-        return f"FLOAT[{self.dim}]" if self.dim is not None else "FLOAT[]"
+        # Use TEXT for JSON serialization, compatible with sqlite-vec when available
+        return "TEXT"
 
     def bind_processor(
         self, dialect: Dialect
-    ) -> Callable[[FloatVector | None], list[float] | None]:
-        """Process NumPy ndarray to SQLite vector format for bound parameters."""
+    ) -> Callable[[FloatVector | None], str | None]:
+        """Process NumPy ndarray to JSON string for SQLite storage."""
+        import json
 
-        def process(value: FloatVector | None) -> list[float] | None:
-            return np.ravel(value).tolist() if value is not None else None
+        def process(value: FloatVector | None) -> str | None:
+            if value is not None:
+                # Convert to list and serialize as JSON
+                value_list = np.ravel(value).tolist()
+                return json.dumps(value_list)
+            return None
 
         return process
 
     def result_processor(
         self, dialect: Dialect, coltype: Any
-    ) -> Callable[[list[float] | None], FloatVector | None]:
-        """Process SQLite vector format to NumPy ndarray."""
+    ) -> Callable[[str | None], FloatVector | None]:
+        """Process JSON string from SQLite to NumPy ndarray."""
+        import json
 
-        def process(value: list[float] | None) -> FloatVector | None:
-            return np.asarray(value, dtype=np.float32) if value is not None else None
+        def process(value: str | None) -> FloatVector | None:
+            if value is not None:
+                # Deserialize JSON and convert to numpy array
+                value_list = json.loads(value)
+                return np.asarray(value_list, dtype=np.float32)
+            return None
 
         return process
 

@@ -1,3 +1,4 @@
+---
 name: "Copilot Setup Steps"
 on:
   workflow_dispatch:
@@ -32,7 +33,8 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', 'pyproject.toml') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt',
+            'pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -42,7 +44,8 @@ jobs:
           # Install with retry mechanism
           pip install -e .[dev,test] || pip install -e . || pip install .
           # Install SQLite dependencies with fallbacks
-          pip install sqlite-vec pynndescent || echo "Some SQLite dependencies failed - continuing with fallbacks"
+          pip install sqlite-vec pynndescent || \
+            echo "Some SQLite dependencies failed - continuing with fallbacks"
 
       - name: Setup Node.js with Yarn fallback
         run: |
@@ -50,7 +53,8 @@ jobs:
           npm install -g yarn || true
           # Cache Node modules if package.json exists
           if [ -f "package.json" ]; then
-            npm install || yarn install || echo "Node.js dependency install failed"
+            npm install || yarn install || \
+              echo "Node.js dependency install failed"
           fi
 
       - name: Run environment setup script
@@ -62,7 +66,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+          # No cache since we don't have package.json/lock files
 
       - name: Run tests
         run: |
@@ -70,7 +74,14 @@ jobs:
 
       - name: Validate SQLite backend
         run: |
-          python -c "import sqlite3; conn = sqlite3.connect('tests/test_raglite.db'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM documents'); print(f'Documents: {cursor.fetchone()[0]}'); conn.close()"
+          python -c "
+          import sqlite3
+          conn = sqlite3.connect('tests/test_raglite.db')
+          cursor = conn.cursor()
+          cursor.execute('SELECT COUNT(*) FROM documents')
+          print(f'Documents: {cursor.fetchone()[0]}')
+          conn.close()
+          "
 
       - name: Check documentation
         run: |

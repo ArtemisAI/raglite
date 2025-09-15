@@ -1,3 +1,4 @@
+---
 name: Test
 
 on:
@@ -18,7 +19,8 @@ jobs:
         python-version: ["3.10", "3.12"]
         resolution-strategy: ["highest", "lowest-direct"]
 
-    name: Python ${{ matrix.python-version }} (resolution=${{ matrix.resolution-strategy }})
+    name: Python ${{ matrix.python-version }}
+      (resolution=${{ matrix.resolution-strategy }})
 
     steps:
       - name: Checkout
@@ -28,6 +30,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 23
+          # No cache since we don't have package.json/lock files
 
       - name: Install @devcontainers/cli
         run: npm install --location=global @devcontainers/cli@0.73.0
@@ -45,12 +48,15 @@ jobs:
 
       - name: Install SQLite dependencies in container
         run: |
-          devcontainer exec --workspace-folder . pip install sqlite-vec pynndescent
+          devcontainer exec --workspace-folder . \
+            pip install sqlite-vec pynndescent
 
       - name: Run environment setup in container
         run: |
-          devcontainer exec --workspace-folder . chmod +x .github/setup-environment.sh
-          devcontainer exec --workspace-folder . ./.github/setup-environment.sh
+          devcontainer exec --workspace-folder . \
+            chmod +x .github/setup-environment.sh
+          devcontainer exec --workspace-folder . \
+            ./.github/setup-environment.sh
 
       - name: Lint package
         run: devcontainer exec --workspace-folder . poe lint
