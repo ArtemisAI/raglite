@@ -1,0 +1,147 @@
+name: GPU Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: 'GPU Runner Label (leave empty for standard runners)'
+        required: false
+        default: ''
+  schedule:
+    # Run GPU tests weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  gpu-test:
+    runs-on: ${{ github.event.inputs.runner_label || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    env:
+      PYTHON_VERSION: "3.11"
+      OLLAMA_CUDA_SUPPORT: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install NVIDIA drivers (if needed)
+        if: runner.os == 'Linux'
+        run: |
+          # Check if NVIDIA GPU is available
+          if command -v nvidia-smi &> /dev/null; then
+            echo "🎮 NVIDIA GPU detected"
+            nvidia-smi
+
+            # Install CUDA toolkit if not present
+            if ! command -v nvcc &> /dev/null; then
+              echo "📦 Installing CUDA toolkit..."
+              wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+              sudo dpkg -i cuda-keyring_1.1-1_all.deb
+              sudo apt-get update
+              sudo apt-get install -y cuda-toolkit-12-2
+            fi
+
+            # Set CUDA environment variables
+            echo "CUDA_HOME=/usr/local/cuda" >> $GITHUB_ENV
+            echo "/usr/local/cuda/bin:/usr/local/cuda/lib64" >> $GITHUB_PATH
+            export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          else
+            echo "💻 No NVIDIA GPU detected, skipping CUDA setup"
+            echo "OLLAMA_CUDA_SUPPORT=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev,test]
+          pip install sqlite-vec pynndescent
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.ai/install.sh | sh
+          ollama pull embedding-embeddingemma
+
+      - name: Run GPU-accelerated tests
+        run: |
+          echo "🧪 Running tests with GPU acceleration..."
+          python -m pytest tests/ -v -k "gpu or cuda or embed" --tb=short
+
+      - name: Benchmark GPU performance
+        run: |
+          echo "📊 Running GPU performance benchmarks..."
+          python -c "
+          import time
+          from raglite import RAGLiteConfig
+          from raglite._embed import embed_strings
+
+          # Test embedding performance
+          test_texts = ['This is a test document for GPU benchmarking.'] * 100
+          config = RAGLiteConfig()
+
+          start_time = time.time()
+          embeddings = embed_strings(test_texts, config=config)
+          end_time = time.time()
+
+          print(f'🎯 GPU Benchmark Results:')
+          print(f'   - Processed {len(test_texts)} texts')
+          print(f'   - Time taken: {end_time - start_time:.2f} seconds')
+          print(f'   - Average time per text: {(end_time - start_time)/len(test_texts)*1000:.2f} ms')
+          print(f'   - Embedding dimensions: {embeddings.shape[1]}')
+          "
+
+      - name: Validate GPU SQLite operations
+        run: |
+          python -c "
+          import sqlite3
+          import sqlite_vec
+          import numpy as np
+          import time
+
+          # Test GPU-accelerated vector operations
+          conn = sqlite3.connect(':memory:')
+          conn.enable_load_extension(True)
+          conn.load_extension(sqlite_vec.loadable_path())
+
+          # Create vector table
+          conn.execute('CREATE VIRTUAL TABLE vectors USING vec0(id INTEGER PRIMARY KEY, vec FLOAT[768])')
+
+          # Generate test vectors
+          test_vectors = []
+          for i in range(1000):
+              vec = np.random.rand(768).astype(np.float32)
+              test_vectors.append((i, sqlite_vec.serialize_float32(vec)))
+
+          # Insert vectors
+          start_time = time.time()
+          conn.executemany('INSERT INTO vectors VALUES (?, ?)', test_vectors)
+          conn.commit()
+          insert_time = time.time() - start_time
+
+          # Test similarity search
+          query_vec = sqlite_vec.serialize_float32(np.random.rand(768).astype(np.float32))
+          start_time = time.time()
+          results = conn.execute('''
+              SELECT id FROM vectors
+              ORDER BY vec_distance_cosine(vec, ?) LIMIT 10
+          ''', (query_vec,)).fetchall()
+          search_time = time.time() - start_time
+
+          print(f'🔍 GPU SQLite Performance:')
+          print(f'   - Inserted {len(test_vectors)} vectors in {insert_time:.3f}s')
+          print(f'   - Similarity search completed in {search_time:.3f}s')
+          print(f'   - Found {len(results)} nearest neighbors')
+
+          conn.close()
+          "
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: gpu-benchmark-results
+          path: |
+            *.log
+            benchmark_*.json

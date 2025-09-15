@@ -122,6 +122,12 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 export OLLAMA_CUDA_SUPPORT=true
 ```
 
+### GPU Support Status
+- **GitHub Actions**: Standard runners don't have GPU support
+- **Local Development**: GPU support auto-detected and configured
+- **GPU Workflow**: `gpu-test.yml` for GPU-enabled environments
+- **Fallback**: CPU mode automatically used when GPU unavailable
+
 ## GitHub Actions Runner Configuration
 
 ### Runner Requirements

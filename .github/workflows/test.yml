@@ -40,6 +40,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PYTHON_VERSION: ${{ matrix.python-version }}
           RESOLUTION_STRATEGY: ${{ matrix.resolution-strategy }}
+          # GPU support will be auto-detected in container
+          OLLAMA_CUDA_SUPPORT: false
 
       - name: Install SQLite dependencies in container
         run: |

@@ -17,6 +17,8 @@ jobs:
       # Python project environment variables
       PYTHON_VERSION: "3.11"
       NODE_ENV: development
+      # GPU support (will be detected and configured automatically)
+      OLLAMA_CUDA_SUPPORT: false
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

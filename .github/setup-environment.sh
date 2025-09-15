@@ -27,12 +27,23 @@ echo "📥 Pulling Ollama embedding model..."
 ollama pull embedding-embeddingemma
 
 # Check GPU support
+echo "🔍 Checking GPU support..."
 if command -v nvidia-smi &> /dev/null; then
     echo "🎮 NVIDIA GPU detected"
+    nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
     export OLLAMA_CUDA_SUPPORT=true
     echo "✅ GPU support enabled for Ollama"
+
+    # Check CUDA availability
+    if command -v nvcc &> /dev/null; then
+        echo "🔧 CUDA toolkit detected"
+        nvcc --version | grep "release"
+    else
+        echo "⚠️  CUDA toolkit not found - GPU acceleration may be limited"
+    fi
 else
     echo "💻 No NVIDIA GPU detected, using CPU mode"
+    export OLLAMA_CUDA_SUPPORT=false
 fi
 
 # Validate SQLite-vec
