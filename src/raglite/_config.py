@@ -16,6 +16,39 @@ from sqlalchemy.engine import URL
 from raglite._lazy_llama import llama_supports_gpu_offload
 from raglite._typing import ChunkId, SearchMethod
 
+
+def _detect_gpu_support() -> bool:
+    """Detect if GPU support is available and configured."""
+    # Check environment variables first
+    if os.getenv("RAGLITE_DISABLE_GPU", "").lower() in ("1", "true", "yes"):
+        return False
+    if os.getenv("RAGLITE_FORCE_GPU", "").lower() in ("1", "true", "yes"):
+        return True
+    
+    # Check for CUDA environment variables (commonly set in GPU environments)
+    cuda_vars = ["CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "OLLAMA_CUDA_SUPPORT"]
+    if any(os.getenv(var) for var in cuda_vars):
+        return True
+    
+    # Try to detect nvidia-smi (indicates NVIDIA GPU driver presence)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
+            capture_output=True, 
+            text=True, 
+            timeout=5
+        )
+        return result.returncode == 0 and result.stdout.strip()
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+        pass
+    
+    # Fallback to llama-cpp-python detection if available
+    try:
+        return llama_supports_gpu_offload()
+    except Exception:
+        return False
+
 # Lazy import helpers for heavy dependencies to avoid import conflicts
 def _lazy_import_rerankers():
     """Lazily import rerankers to avoid heavy dependency loading on module import."""
@@ -39,12 +72,13 @@ cache_path = Path(user_data_dir("raglite", ensure_exists=True))
 def _default_llm():
     """Create default LLM with safe dependency checking."""
     try:
+        gpu_available = _detect_gpu_support()
         return (
             "llama-cpp-python/unsloth/Qwen3-8B-GGUF/*Q4_K_M.gguf@8192"
-            if llama_supports_gpu_offload()
+            if gpu_available
             else "llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192"
         )
-    except ModuleNotFoundError:
+    except Exception:
         # Fallback to a simple LLM configuration that doesn't require llama-cpp-python
         return "openai/gpt-3.5-turbo"
 
@@ -52,12 +86,14 @@ def _default_llm():
 def _default_embedder():
     """Create default embedder with safe dependency checking."""
     try:
+        gpu_available = _detect_gpu_support()
+        cpu_cores = os.cpu_count() or 1
         return (  # Nomic-embed may be better if only English is used.
             "llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512"
-            if llama_supports_gpu_offload() or (os.cpu_count() or 1) >= 4  # noqa: PLR2004
+            if gpu_available or cpu_cores >= 4  # noqa: PLR2004
             else "llama-cpp-python/lm-kit/bge-m3-gguf/*Q4_K_M.gguf@512"
         )
-    except ModuleNotFoundError:
+    except Exception:
         # Fallback to OpenAI embeddings when llama-cpp-python is not available
         return "openai/text-embedding-ada-002"
 

@@ -364,9 +364,9 @@ class ChunkSpan:
         return self.content
 
 
-# We manually create an auto-incrementing sequence for `chunk_embedding.id` here because DuckDB
-# doesn't support `id SERIAL` out of the box.
-chunk_embedding_id_seq = Sequence("chunk_embedding_id_seq")
+# We use database-agnostic auto-incrementing primary keys.
+# SQLModel/SQLAlchemy handles the differences between SQLite AUTOINCREMENT, 
+# PostgreSQL SERIAL, and DuckDB sequences automatically.
 
 
 class ChunkEmbedding(SQLModel, table=True):
@@ -380,12 +380,8 @@ class ChunkEmbedding(SQLModel, table=True):
     # Table columns.
     id: int | None = Field(
         default=None,
-        sa_column=Column(
-            Integer,
-            chunk_embedding_id_seq,
-            primary_key=True,
-            server_default=chunk_embedding_id_seq.next_value(),
-        ),
+        primary_key=True,
+        # Let SQLModel handle auto-increment in a database-agnostic way
     )
     chunk_id: ChunkId = Field(..., foreign_key="chunk.id", index=True)
     embedding: FloatVector = Field(..., sa_column=Column(Embedding(dim=-1)))
