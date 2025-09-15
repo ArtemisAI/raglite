@@ -59,7 +59,9 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
-    "tqdm>=4.65.0"
+    "tqdm>=4.65.0",
+    "sqlite-vec>=0.1.0",
+    "pynndescent>=0.5.12"
 ]
 
 [project.optional-dependencies]
@@ -76,7 +78,9 @@ dev = [
 test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0"
+    "pytest-cov>=4.0.0",
+    "sqlite-vec>=0.1.0",
+    "pynndescent>=0.5.12"
 ]
 ```
 
@@ -86,11 +90,36 @@ test = [
 sudo apt-get update
 sudo apt-get install -y python3-dev build-essential
 
+# Ollama Installation
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull embedding-embeddingemma
+
 # macOS
 brew install python@3.11
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull embedding-embeddingemma
 
 # Windows
 # Install Python 3.11 from python.org
+# Install Ollama from https://ollama.ai/download
+ollama pull embedding-embeddingemma
+```
+
+### GPU Support (Optional)
+```bash
+# NVIDIA CUDA Installation (Ubuntu)
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get install -y cuda-toolkit-12-2
+
+# Set environment variables
+export CUDA_HOME=/usr/local/cuda
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+# Enable GPU support in Ollama
+export OLLAMA_CUDA_SUPPORT=true
 ```
 
 ## GitHub Actions Runner Configuration

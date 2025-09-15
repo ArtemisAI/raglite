@@ -41,6 +41,15 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
           RESOLUTION_STRATEGY: ${{ matrix.resolution-strategy }}
 
+      - name: Install SQLite dependencies in container
+        run: |
+          devcontainer exec --workspace-folder . pip install sqlite-vec pynndescent
+
+      - name: Run environment setup in container
+        run: |
+          devcontainer exec --workspace-folder . chmod +x .github/setup-environment.sh
+          devcontainer exec --workspace-folder . ./.github/setup-environment.sh
+
       - name: Lint package
         run: devcontainer exec --workspace-folder . poe lint
 

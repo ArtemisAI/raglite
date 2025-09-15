@@ -37,9 +37,17 @@ You are an expert Python developer with deep knowledge of:
 
 ## Technical Requirements
 - **Python Version**: 3.11+
-- **Key Dependencies**: numpy, sqlite3, sentence-transformers, openai
+- **Key Dependencies**: numpy, sqlite3, sentence-transformers, openai, sqlite-vec, pynndescent
 - **Performance Targets**: Sub-second query response times
 - **Architecture**: Modular design with clear separation of concerns
+- **Database Support**: DuckDB, PostgreSQL, and SQLite (with sqlite-vec extension)
+
+## SQLite Implementation Focus
+- **Vector Search**: Use sqlite-vec extension for efficient similarity search
+- **Full-Text Search**: Leverage SQLite's native FTS5 for keyword search
+- **Hybrid Search**: Combine vector and keyword search using Reciprocal Rank Fusion (RRF)
+- **Fallback Mechanisms**: PyNNDescent for vector search when sqlite-vec unavailable
+- **Performance Optimization**: WAL mode, connection pooling, and optimized pragmas
 
 ## Development Guidelines
 1. **Always add type hints** to function parameters and return values
