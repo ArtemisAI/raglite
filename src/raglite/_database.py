@@ -5,6 +5,7 @@ import datetime
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
+import logging
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ import numpy as np
 from markdown_it import MarkdownIt
 from packaging import version
 from pydantic import ConfigDict, PrivateAttr
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import ProgrammingError
 from sqlmodel import (
@@ -26,7 +28,6 @@ from sqlmodel import (
     Session,
     SQLModel,
     create_engine,
-    text,
 )
 
 from raglite._config import RAGLiteConfig
@@ -489,14 +490,19 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
             if db_url.database and db_url.database != ":memory:":
                 Path(db_url.database).parent.mkdir(parents=True, exist_ok=True)
     elif db_backend == "sqlite":
-        # Create parent directories for SQLite database file
-        with contextlib.suppress(Exception):
-            if db_url.database and db_url.database != ":memory:":
-                Path(db_url.database).parent.mkdir(parents=True, exist_ok=True)
-        # SQLite specific connection arguments
+        # Enhanced SQLite backend with sqlite-vec support
+        try:
+            import sqlite_vec
+            sqlite_vec_available = True
+        except ImportError:
+            logger.warning("sqlite-vec not available, falling back to PyNNDescent for vector search")
+            sqlite_vec_available = False
+        
+        # SQLite-specific connection arguments
         connect_args.update({
             "check_same_thread": False,
-            "timeout": 30
+            "timeout": 30,
+            "isolation_level": None,  # Enable autocommit mode
         })
     else:
         error_message = "RAGLite only supports DuckDB, PostgreSQL, or SQLite."
@@ -514,24 +520,36 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
             session.execute(text("INSTALL vss; LOAD vss;"))
             session.commit()
     elif db_backend == "sqlite":
-        with Session(engine) as session:
-            # Apply SQLite performance pragmas
-            session.execute(text("PRAGMA journal_mode = WAL"))
-            session.execute(text("PRAGMA synchronous = NORMAL"))
-            session.execute(text("PRAGMA cache_size = 10000"))
-            session.execute(text("PRAGMA temp_store = memory"))
-            # Load sqlite-vec extension
-            try:
-                session.execute(text("SELECT load_extension('vec0')"))
-            except Exception:
-                # Try alternative loading methods
+        # Apply SQLite performance optimizations and load extensions
+        def _configure_sqlite_connection(dbapi_connection, connection_record):
+            """Configure SQLite connection with performance optimizations and extensions."""
+            cursor = dbapi_connection.cursor()
+            
+            # Performance pragmas
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.execute("PRAGMA synchronous = NORMAL")
+            cursor.execute("PRAGMA cache_size = 10000")
+            cursor.execute("PRAGMA temp_store = memory")
+            cursor.execute("PRAGMA mmap_size = 268435456")  # 256MB
+            cursor.execute("PRAGMA foreign_keys = ON")
+            
+            # Load sqlite-vec extension if available
+            if sqlite_vec_available:
                 try:
-                    session.execute(text("SELECT load_extension('sqlite-vec')"))
-                except Exception:
-                    # For now, we'll continue without the extension for testing
-                    # In production, this should raise an error
-                    pass
-            session.commit()
+                    cursor.execute("SELECT load_extension(?)", (sqlite_vec.loadable_path(),))
+                    logger.info("✅ sqlite-vec extension loaded successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to load sqlite-vec extension: {e}")
+                    sqlite_vec_available = False
+            
+            cursor.close()
+        
+        # Register connection event listener
+        from sqlalchemy import event
+        event.listen(engine, "connect", _configure_sqlite_connection)
+        
+        # Store sqlite-vec availability on engine for later use
+        engine.sqlite_vec_available = sqlite_vec_available
     # Get the embedding dimension.
     embedding_dim = get_embedding_dim(config)
     # Create all SQLModel tables.
@@ -614,28 +632,64 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
                 session.execute(text("""
                     CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts 
                     USING fts5(
-                        id UNINDEXED,
+                        chunk_id UNINDEXED,
                         body,
                         content='chunk',
                         content_rowid='id'
                     )
                 """))
-            except Exception:
-                # FTS5 might not be available, continue without it for now
-                pass
+                
+                # Populate FTS5 index with existing chunks
+                num_chunks = session.execute(text("SELECT COUNT(*) FROM chunk")).scalar_one()
+                if num_chunks > 0:
+                    try:
+                        num_indexed_chunks = session.execute(
+                            text("SELECT COUNT(*) FROM chunk_fts")
+                        ).scalar_one()
+                    except Exception:
+                        num_indexed_chunks = 0
+                    
+                    if num_indexed_chunks != num_chunks:
+                        session.execute(text("DELETE FROM chunk_fts"))
+                        session.execute(text("""
+                            INSERT INTO chunk_fts (chunk_id, body)
+                            SELECT id, body FROM chunk
+                        """))
+                        
+            except Exception as e:
+                # FTS5 might not be available, log warning but continue
+                import logging
+                logging.warning(f"Could not create FTS5 index: {e}. Keyword search will not be available.")
             
             # Create virtual table for vector search using sqlite-vec
             try:
                 session.execute(text(f"""
                     CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings_vec 
                     USING vec0(
-                        id INTEGER PRIMARY KEY,
+                        chunk_id TEXT PRIMARY KEY,
                         embedding FLOAT[{embedding_dim}]
                     )
                 """))
-            except Exception:
-                # sqlite-vec extension might not be available, continue without it for now
-                pass
+                
+                # Populate vector table with existing embeddings
+                num_embeddings = session.execute(text("SELECT COUNT(*) FROM chunk_embedding")).scalar_one()
+                if num_embeddings > 0:
+                    try:
+                        num_indexed_embeddings = session.execute(
+                            text("SELECT COUNT(*) FROM chunk_embeddings_vec")
+                        ).scalar_one()
+                    except Exception:
+                        num_indexed_embeddings = 0
+                        
+                    if num_indexed_embeddings != num_embeddings:
+                        session.execute(text("DELETE FROM chunk_embeddings_vec"))
+                        # Note: Need to implement proper embedding serialization
+                        # This will be handled in the insertion pipeline
+                        
+            except Exception as e:
+                # sqlite-vec extension might not be available, log warning but continue
+                import logging
+                logging.warning(f"Could not create vector index: {e}. Vector search will not be available.")
             
             session.commit()
     return engine

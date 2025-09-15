@@ -107,11 +107,11 @@ def keyword_search(
             # Use FTS5 for keyword search in SQLite
             try:
                 statement = text("""
-                    SELECT chunk.id as chunk_id, rank as score
+                    SELECT chunk.id as chunk_id, bm25(chunk_fts) as score
                     FROM chunk_fts 
                     JOIN chunk ON chunk.id = chunk_fts.rowid
                     WHERE chunk_fts MATCH :query
-                    ORDER BY rank DESC
+                    ORDER BY score
                     LIMIT :limit
                 """)
                 results = session.execute(statement, params={"query": query, "limit": num_results})
@@ -121,6 +121,7 @@ def keyword_search(
                     SELECT id as chunk_id, 1.0 as score
                     FROM chunk
                     WHERE body LIKE '%' || :query || '%'
+                    ORDER BY id
                     LIMIT :limit
                 """)
                 results = session.execute(statement, params={"query": query, "limit": num_results})
