@@ -5,7 +5,10 @@ import os
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from rerankers.models.ranker import BaseRanker
 
 from platformdirs import user_data_dir
 from sqlalchemy.engine import URL
@@ -13,14 +16,33 @@ from sqlalchemy.engine import URL
 from raglite._lazy_llama import llama_supports_gpu_offload
 from raglite._typing import ChunkId, SearchMethod
 
-# Suppress rerankers output on import until [1] is fixed.
-# [1] https://github.com/AnswerDotAI/rerankers/issues/36
-with contextlib.redirect_stdout(StringIO()):
-    from rerankers.models.flashrank_ranker import FlashRankRanker
-    from rerankers.models.ranker import BaseRanker
+# Lazy import helpers for heavy dependencies to avoid import conflicts
+def _lazy_import_rerankers():
+    """Lazily import rerankers to avoid heavy dependency loading on module import."""
+    try:
+        # Suppress rerankers output on import until [1] is fixed.
+        # [1] https://github.com/AnswerDotAI/rerankers/issues/36
+        with contextlib.redirect_stdout(StringIO()):
+            from rerankers.models.flashrank_ranker import FlashRankRanker
+            from rerankers.models.ranker import BaseRanker
+        return FlashRankRanker, BaseRanker
+    except ImportError as e:
+        raise ImportError(
+            "rerankers is required for reranking functionality. "
+            "Install with: pip install 'raglite[rerank]' or pip install rerankers"
+        ) from e
 
 
 cache_path = Path(user_data_dir("raglite", ensure_exists=True))
+
+
+def _default_reranker():
+    """Create default reranker with lazy loading."""
+    FlashRankRanker, _ = _lazy_import_rerankers()
+    return {
+        "en": FlashRankRanker("ms-marco-MiniLM-L-12-v2", verbose=0, cache_dir=cache_path),
+        "other": FlashRankRanker("ms-marco-MultiBERT-L-12", verbose=0, cache_dir=cache_path),
+    }
 
 
 # Lazily load the default search method to avoid circular imports.
@@ -64,11 +86,8 @@ class RAGLiteConfig:
     vector_search_multivector: bool = True
     vector_search_query_adapter: bool = True  # Only supported for "cosine" and "dot" metrics.
     # Reranking config.
-    reranker: BaseRanker | dict[str, BaseRanker] | None = field(
-        default_factory=lambda: {
-            "en": FlashRankRanker("ms-marco-MiniLM-L-12-v2", verbose=0, cache_dir=cache_path),
-            "other": FlashRankRanker("ms-marco-MultiBERT-L-12", verbose=0, cache_dir=cache_path),
-        },
+    reranker: "BaseRanker | dict[str, BaseRanker] | None" = field(
+        default_factory=_default_reranker,
         compare=False,  # Exclude the reranker from comparison to avoid lru_cache misses.
     )
     # Search config: you can pick any search method that returns (list[ChunkId], list[float]),
