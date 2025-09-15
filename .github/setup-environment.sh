@@ -13,18 +13,74 @@ echo "📍 Python version: $python_version"
 # Install Python dependencies
 echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
-pip install -e .[dev,test]
-pip install sqlite-vec pynndescent
+
+# Install with retry mechanism
+echo "🔄 Installing package in development mode..."
+pip install -e .[dev,test] || {
+    echo "⚠️  Regular install failed, trying without dev extras..."
+    pip install -e . || {
+        echo "❌ Development install failed, trying production install..."
+        pip install .
+    }
+}
+
+# Install SQLite dependencies with fallbacks
+echo "🗄️  Installing SQLite dependencies..."
+pip install sqlite-vec pynndescent || {
+    echo "⚠️  Direct install failed, trying individual packages..."
+    pip install sqlite-vec || echo "⚠️  sqlite-vec install failed - will use fallback"
+    pip install pynndescent || echo "⚠️  pynndescent install failed - will use fallback"
+}
+
+# Install Node.js dependencies with yarn fallback if needed
+if [ -f "package.json" ]; then
+    echo "📦 Installing Node.js dependencies..."
+    if command -v npm &> /dev/null; then
+        npm install || {
+            echo "⚠️  npm install failed, trying yarn..."
+            if command -v yarn &> /dev/null; then
+                yarn install
+            else
+                echo "🔄 Installing yarn..."
+                npm install -g yarn || curl -o- -L https://yarnpkg.com/install.sh | bash
+                yarn install
+            fi
+        }
+    else
+        echo "🔄 Installing npm..."
+        # Install Node.js if not present
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+        npm install
+    fi
+fi
 
 # Install Ollama if not present
 if ! command -v ollama &> /dev/null; then
     echo "🤖 Installing Ollama..."
-    curl -fsSL https://ollama.ai/install.sh | sh
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        curl -fsSL https://ollama.ai/install.sh | sh
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        curl -fsSL https://ollama.ai/install.sh | sh
+    elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
+        # Windows
+        echo "📥 Please install Ollama manually from https://ollama.ai/download"
+        echo "⚠️  Continuing without Ollama - will use fallback embeddings"
+    else
+        echo "⚠️  Unknown OS type, skipping Ollama install"
+    fi
 fi
 
-# Pull embedding model
+# Pull embedding model with fallback
 echo "📥 Pulling Ollama embedding model..."
-ollama pull embedding-embeddingemma
+ollama pull nomic-embed-text || {
+    echo "⚠️  Failed to pull nomic-embed-text, trying alternative..."
+    ollama pull all-minilm || {
+        echo "⚠️  Failed to pull embedding models - will use OpenAI fallback"
+        export RAGLITE_EMBEDDER="openai"
+    }
+}
 
 # Check GPU support
 echo "🔍 Checking GPU support..."
