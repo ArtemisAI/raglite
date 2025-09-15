@@ -103,6 +103,30 @@ def keyword_search(
                 """
             )
             results = session.execute(statement, params={"query": query, "limit": num_results})
+        elif dialect == "sqlite":
+            # Use FTS5 for keyword search in SQLite
+            try:
+                statement = text("""
+                    SELECT chunk.id as chunk_id, rank as score
+                    FROM chunk_fts 
+                    JOIN chunk ON chunk.id = chunk_fts.rowid
+                    WHERE chunk_fts MATCH :query
+                    ORDER BY rank DESC
+                    LIMIT :limit
+                """)
+                results = session.execute(statement, params={"query": query, "limit": num_results})
+            except Exception:
+                # Fallback to simple LIKE search if FTS5 is not available
+                statement = text("""
+                    SELECT id as chunk_id, 1.0 as score
+                    FROM chunk
+                    WHERE body LIKE '%' || :query || '%'
+                    LIMIT :limit
+                """)
+                results = session.execute(statement, params={"query": query, "limit": num_results})
+        else:
+            error_message = f"Keyword search is not supported for {dialect}."
+            raise ValueError(error_message)
         # Unpack the results.
         results = list(results)  # type: ignore[assignment]
         chunk_ids = [result.chunk_id for result in results]

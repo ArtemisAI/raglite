@@ -55,10 +55,19 @@ def duckdb_url() -> Generator[str, None, None]:
         yield f"duckdb:///{db_file}"
 
 
+@pytest.fixture(scope="session")
+def sqlite_url() -> Generator[str, None, None]:
+    """Create a temporary SQLite database file and return the database URL."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_file = Path(temp_dir) / "raglite_test.db"
+        yield f"sqlite:///{db_file}"
+
+
 @pytest.fixture(
     scope="session",
     params=[
         pytest.param("duckdb", id="duckdb"),
+        pytest.param("sqlite", id="sqlite"),
         pytest.param(
             POSTGRES_URL,
             id="postgres",
@@ -68,9 +77,12 @@ def duckdb_url() -> Generator[str, None, None]:
 )
 def database(request: pytest.FixtureRequest) -> str:
     """Get a database URL to test RAGLite with."""
-    db_url: str = (
-        request.getfixturevalue("duckdb_url") if request.param == "duckdb" else request.param
-    )
+    if request.param == "duckdb":
+        db_url = request.getfixturevalue("duckdb_url")
+    elif request.param == "sqlite":
+        db_url = request.getfixturevalue("sqlite_url")
+    else:
+        db_url = request.param
     return db_url
 
 

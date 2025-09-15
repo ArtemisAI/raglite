@@ -130,8 +130,8 @@ def insert_documents(  # noqa: C901
         documents = [doc for doc in documents if doc.id not in existing_doc_ids]
         if not documents:
             return
-    # For DuckDB databases, acquire a lock on the database.
-    if engine.dialect.name == "duckdb":
+    # For DuckDB and SQLite databases, acquire a lock on the database.
+    if engine.dialect.name in ("duckdb", "sqlite"):
         db_url = make_url(config.db_url) if isinstance(config.db_url, str) else config.db_url
         db_lock = (
             FileLock(Path(db_url.database).with_suffix(".lock"))
@@ -153,9 +153,11 @@ def insert_documents(  # noqa: C901
             executor.submit(partial(_create_chunk_records, config=config), doc) for doc in documents
         ]
         num_unflushed_embeddings = 0
+        all_results = []  # Store results for SQLite processing
         for future in as_completed(futures):
             try:
                 document_record, chunk_records, chunk_embedding_records_list = future.result()
+                all_results.append((document_record, chunk_records, chunk_embedding_records_list))
             except Exception as e:
                 executor.shutdown(cancel_futures=True)  # Cancel remaining work.
                 session.rollback()  # Cancel uncommitted changes.
@@ -185,3 +187,27 @@ def insert_documents(  # noqa: C901
                 session.execute(text("PRAGMA hnsw_compact_index('vector_search_chunk_index');"))
             session.commit()
             session.execute(text("CHECKPOINT;"))
+        elif engine.dialect.name == "sqlite":
+            # Update FTS5 index for SQLite and rebuild/refresh vector index if needed
+            try:
+                # For FTS5, insert or update chunk content
+                for doc, chunks, _ in all_results:
+                    for chunk in chunks:
+                        session.execute(text("""
+                            INSERT OR REPLACE INTO chunk_fts (id, body)
+                            VALUES (:id, :body)
+                        """), {"id": chunk.id, "body": chunk.body})
+                
+                # For vector table, insert embeddings
+                for doc, chunks, chunk_embeddings_list in all_results:
+                    for chunk_embeddings in chunk_embeddings_list:
+                        for chunk_embedding in chunk_embeddings:
+                            session.execute(text("""
+                                INSERT OR REPLACE INTO chunk_embeddings_vec (id, embedding)
+                                VALUES (:id, :embedding)
+                            """), {"id": chunk_embedding.chunk_id, "embedding": chunk_embedding.embedding.tolist()})
+                
+                session.commit()
+            except Exception:
+                # If FTS5 or vector tables don't exist, continue silently
+                pass

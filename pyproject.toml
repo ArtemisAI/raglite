@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]  # https://packaging.python.org/en/latest/specifications/pyproject-toml/
 name = "raglite"
 version = "1.0.0"
-description = "A Python toolkit for Retrieval-Augmented Generation (RAG) with DuckDB or PostgreSQL."
+description = "A Python toolkit for Retrieval-Augmented Generation (RAG) with DuckDB, PostgreSQL, or SQLite."
 readme = "README.md"
 authors = [
   { name = "Laurent Sorber", email = "laurent@superlinear.eu" },
@@ -34,6 +34,8 @@ dependencies = [
   "duckdb-engine (>=0.16.0)",
   "pg8000 (>=1.31.2)",
   "sqlmodel-slim (>=0.0.21)",
+  "sqlite-vec (>=0.1.0)",
+  "pynndescent (>=0.5.12)",
   # Progress:
   "tqdm (>=4.66.0)",
   # CLI:

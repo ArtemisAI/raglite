@@ -121,6 +121,19 @@ def _embedding_distance_duckdb(element: EmbeddingDistance, compiler: Any, **kwar
     return f"{func_name}({compiler.process(left)}, {right_cast})"
 
 
+@compiles(EmbeddingDistance, "sqlite")
+def _embedding_distance_sqlite(element: EmbeddingDistance, compiler: Any, **kwargs: Any) -> str:
+    """Compile embedding distance for SQLite using sqlite-vec."""
+    func_map: dict[DistanceMetric, str] = {
+        "cosine": "vec_distance_cosine",
+        "dot": "vec_distance_dot", 
+        "l2": "vec_distance_l2",
+    }
+    left, right = list(element.clauses)
+    func_name = func_map[element.metric]
+    return f"{func_name}({compiler.process(left)}, {compiler.process(right)})"
+
+
 class EmbeddingComparator(UserDefinedType.Comparator[FloatVector]):
     """An embedding distance comparator."""
 
