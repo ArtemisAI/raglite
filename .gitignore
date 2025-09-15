@@ -67,6 +67,7 @@ dist/
 
 # RAGLite
 *.db
+!tests/*.db  # ensure test database is tracked
 
 # Ruff
 .ruff_cache/
