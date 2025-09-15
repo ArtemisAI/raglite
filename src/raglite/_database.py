@@ -1,4 +1,4 @@
-"""DuckDB or PostgreSQL database tables for RAGLite."""
+"""DuckDB, PostgreSQL, or SQLite database tables for RAGLite."""
 
 import contextlib
 import datetime

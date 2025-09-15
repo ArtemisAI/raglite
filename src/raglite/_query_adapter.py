@@ -212,7 +212,7 @@ def update_query_adapter(
         flag_modified(index_metadata, "metadata_")
         session.add(index_metadata)
         session.commit()
-        if engine.dialect.name == "duckdb":
+        if engine.dialect.name in ("duckdb", "sqlite"):
             session.execute(text("CHECKPOINT;"))
         # Clear the index metadata cache to allow the new query adapter to be used.
         IndexMetadata._get.cache_clear()  # noqa: SLF001

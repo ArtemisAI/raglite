@@ -208,6 +208,39 @@ class DuckDBSingleVec(UserDefinedType[FloatVector]):
         return process
 
 
+class SQLiteVec(UserDefinedType[FloatVector]):
+    """A SQLite vector column type for SQLAlchemy using sqlite-vec."""
+
+    cache_ok = True
+
+    def __init__(self, dim: int | None = None) -> None:
+        super().__init__()
+        self.dim = dim
+
+    def get_col_spec(self, **kwargs: Any) -> str:
+        return f"FLOAT[{self.dim}]" if self.dim is not None else "FLOAT[]"
+
+    def bind_processor(
+        self, dialect: Dialect
+    ) -> Callable[[FloatVector | None], list[float] | None]:
+        """Process NumPy ndarray to SQLite vector format for bound parameters."""
+
+        def process(value: FloatVector | None) -> list[float] | None:
+            return np.ravel(value).tolist() if value is not None else None
+
+        return process
+
+    def result_processor(
+        self, dialect: Dialect, coltype: Any
+    ) -> Callable[[list[float] | None], FloatVector | None]:
+        """Process SQLite vector format to NumPy ndarray."""
+
+        def process(value: list[float] | None) -> FloatVector | None:
+            return np.asarray(value, dtype=np.float32) if value is not None else None
+
+        return process
+
+
 class Embedding(TypeDecorator[FloatVector]):
     """An embedding column type for SQLAlchemy."""
 
@@ -224,4 +257,6 @@ class Embedding(TypeDecorator[FloatVector]):
             return dialect.type_descriptor(PostgresHalfVec(self.dim))
         if dialect.name == "duckdb":
             return dialect.type_descriptor(DuckDBSingleVec(self.dim))
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(SQLiteVec(self.dim))
         return dialect.type_descriptor(NumpyArray())
