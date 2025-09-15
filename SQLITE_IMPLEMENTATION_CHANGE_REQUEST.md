@@ -418,26 +418,55 @@ def database(request: pytest.FixtureRequest) -> str:
 - Add SQLite-specific troubleshooting guide
 - Include performance tuning recommendations
 
-## 📋 Checklist for Implementation
+## 🛠 Known Issues & Diagnostics
 
-- [ ] Update `pyproject.toml` with SQLite dependencies
-- [ ] Modify `_config.py` default configuration
-- [ ] Implement SQLite engine in `_database.py`
-- [ ] Add vector search in `_search.py`
-- [ ] Update insertion pipeline in `_insert.py`
-- [ ] Add SQLite types in `_typing.py`
-- [ ] Update test configuration in `conftest.py`
-- [ ] Update documentation in `README.md`
-- [ ] Add comprehensive test coverage
-- [ ] Validate performance benchmarks
-- [ ] Create migration utilities
-- [ ] Update CI/CD pipeline for SQLite testing
+- **Import Conflicts**: RAGLite imports fail due to TensorFlow/transformers version incompatibilities (e.g., `register_load_context_function` missing).
+- **Rerankers Dependency**: The `rerankers` package pulls in heavy ML frameworks, causing import errors in CI and local tests.
+- **Testing Environment**: Full end-to-end tests against the SQLite backend are blocked by the above import errors.
+- **Ollama Not Detected**: Scripts currently assume Ollama CLI is available for embedding operations; missing installation leads to failures.
+- **GPU Utilization**: Embedding model setup does not configure NVIDIA GPU support, leading to slower CPU-only execution.
 
----
+## 📦 Environment & Setup Instructions
 
-**Priority**: High
-**Estimated Effort**: 3-5 days
-**Complexity**: Medium-High
-**Dependencies**: sqlite-vec extension availability
+To ensure the coding agent and CI environment have all prerequisites, add the following to your GitHub Actions workflows (e.g., `.github/workflows/ci.yml`):
 
-This change request provides a comprehensive roadmap for implementing robust SQLite support in RAGLite while maintaining full compatibility with existing functionality.
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install Ollama CLI
+        run: |
+          curl -sSfL https://ollama.com/install.sh | sh
+      - name: Verify Ollama installation
+        run: |
+          ollama --version
+      - name: Install Embedding Models
+        run: |
+          ollama install embeddingemma
+      - name: Configure GPU Support
+        run: |
+          echo "OLLAMA_CUDA_SUPPORT=true" >> $GITHUB_ENV
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install sqlite-vec pynndescent
+      - name: Run Test Suite
+        run: pytest -q
+```
+
+- **Local Development**: In your `setup.sh` or `install.sh` bootstrap script, include checks:
+  ```bash
+  if ! command -v ollama &>/dev/null; then
+    curl -sSfL https://ollama.com/install.sh | sh
+  fi
+  ollama install embeddingemma
+  ```
+
+- **GPU Configuration**: Ensure the runner has NVIDIA drivers and CUDA toolkit installed, and set `OLLAMA_CUDA_SUPPORT=true` in the environment.
+````
