@@ -646,13 +646,12 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
         with Session(engine) as session:
             # Create FTS5 index for keyword search
             try:
+                # Create a simple FTS5 table without external content linking
                 session.execute(text("""
                     CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts 
                     USING fts5(
                         chunk_id UNINDEXED,
-                        body,
-                        content='chunk',
-                        content_rowid='id'
+                        body
                     )
                 """))
                 
@@ -672,6 +671,7 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
                             INSERT INTO chunk_fts (chunk_id, body)
                             SELECT id, body FROM chunk
                         """))
+                        print(f"✅ FTS5 index populated with {num_chunks} chunks")
                         
             except Exception as e:
                 # FTS5 might not be available, log warning but continue
