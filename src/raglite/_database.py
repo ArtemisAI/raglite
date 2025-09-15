@@ -44,6 +44,9 @@ from raglite._typing import (
     PickledObject,
 )
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 
 def hash_bytes(data: bytes, max_len: int = 16) -> str:
     """Hash bytes to a hexadecimal string."""
@@ -504,6 +507,11 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
             "timeout": 30,
             "isolation_level": None,  # Enable autocommit mode
         })
+        
+        # Create database directory if it doesn't exist
+        with contextlib.suppress(Exception):
+            if db_url.database and db_url.database != ":memory:":
+                Path(db_url.database).parent.mkdir(parents=True, exist_ok=True)
     else:
         error_message = "RAGLite only supports DuckDB, PostgreSQL, or SQLite."
         raise ValueError(error_message)
@@ -536,11 +544,20 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
             # Load sqlite-vec extension if available
             if sqlite_vec_available:
                 try:
-                    cursor.execute("SELECT load_extension(?)", (sqlite_vec.loadable_path(),))
+                    # Enable extension loading first
+                    dbapi_connection.enable_load_extension(True)
+                    dbapi_connection.load_extension(sqlite_vec.loadable_path())
                     logger.info("✅ sqlite-vec extension loaded successfully")
                 except Exception as e:
                     logger.warning(f"Failed to load sqlite-vec extension: {e}")
-                    sqlite_vec_available = False
+                    # Note: We can't modify the outer scope variable from here
+                    # The sqlite_vec_available status is stored on the engine instead
+                finally:
+                    # Disable extension loading for security
+                    try:
+                        dbapi_connection.enable_load_extension(False)
+                    except Exception:
+                        pass
             
             cursor.close()
         
