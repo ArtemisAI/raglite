@@ -2,14 +2,14 @@
 
 # 🥤 RAGLite
 
-RAGLite is a Python toolkit for Retrieval-Augmented Generation (RAG) with DuckDB or PostgreSQL.
+RAGLite is a Python toolkit for Retrieval-Augmented Generation (RAG) with DuckDB, PostgreSQL, or SQLite.
 
 ## Features
 
 ##### Configurable
 
 - 🧠 Choose any LLM provider with [LiteLLM](https://github.com/BerriAI/litellm), including local [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) models
-- 💾 Choose either [DuckDB](https://duckdb.org) or [PostgreSQL](https://github.com/postgres/postgres) as a keyword & vector search database
+- 💾 Choose from [DuckDB](https://duckdb.org), [PostgreSQL](https://github.com/postgres/postgres), or [SQLite](https://sqlite.org) as a keyword & vector search database
 - 🥇 Choose any reranker with [rerankers](https://github.com/AnswerDotAI/rerankers), including multilingual [FlashRank](https://github.com/PrithivirajDamodaran/FlashRank) as the default
 
 ##### Fast and permissive
@@ -23,7 +23,7 @@ RAGLite is a Python toolkit for Retrieval-Augmented Generation (RAG) with DuckDB
 - 🧬 Multi-vector chunk embedding with [late chunking](https://weaviate.io/blog/late-chunking) and [contextual chunk headings](https://d-star.ai/solving-the-out-of-context-chunk-problem-for-rag)
 - ✏️ Optimal sentence splitting with [wtpsplit-lite](https://github.com/superlinear-ai/wtpsplit-lite) by solving a [binary integer programming problem](https://en.wikipedia.org/wiki/Integer_programming)
 - ✂️ Optimal [semantic chunking](https://www.youtube.com/watch?v=8OJC21T2SL4&t=1930s) by solving a [binary integer programming problem](https://en.wikipedia.org/wiki/Integer_programming)
-- 🔍 [Hybrid search](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) with the database's native keyword & vector search ([FTS](https://duckdb.org/docs/stable/extensions/full_text_search)+[VSS](https://duckdb.org/docs/stable/extensions/vss); [tsvector](https://www.postgresql.org/docs/current/datatype-textsearch.html)+[pgvector](https://github.com/pgvector/pgvector))
+- 🔍 [Hybrid search](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) with the database's native keyword & vector search ([FTS](https://duckdb.org/docs/stable/extensions/full_text_search)+[VSS](https://duckdb.org/docs/stable/extensions/vss); [tsvector](https://www.postgresql.org/docs/current/datatype-textsearch.html)+[pgvector](https://github.com/pgvector/pgvector); [FTS5](https://www.sqlite.org/fts5.html)+[sqlite-vec](https://github.com/asg017/sqlite-vec))
 - 💭 [Adaptive retrieval](https://arxiv.org/abs/2403.14403) where the LLM decides whether to and what to retrieve based on the query
 - 💰 Improved cost and latency with a [prompt caching-aware message array structure](https://platform.openai.com/docs/guides/prompt-caching)
 - 🍰 Improved output quality with [Anthropic's long-context prompt format](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips)
@@ -95,7 +95,10 @@ pip install raglite[ragas]
 > [!TIP]
 > 💾 You can create a PostgreSQL database in a few clicks at [neon.tech](https://neon.tech).
 
-First, configure RAGLite with your preferred DuckDB or PostgreSQL database and [any LLM supported by LiteLLM](https://docs.litellm.ai/docs/providers/openai):
+> [!NOTE]
+> 🗃️ SQLite vector search requires the [sqlite-vec](https://github.com/asg017/sqlite-vec) extension. RAGLite will attempt to load it automatically. If the extension is not available, vector search will fall back to standard similarity calculations (this may impact performance for large datasets).
+
+First, configure RAGLite with your preferred SQLite, DuckDB, or PostgreSQL database and [any LLM supported by LiteLLM](https://docs.litellm.ai/docs/providers/openai):
 
 ```python
 from raglite import RAGLiteConfig
@@ -105,6 +108,13 @@ my_config = RAGLiteConfig(
     db_url="postgresql://my_username:my_password@my_host:5432/my_database",
     llm="gpt-4o-mini",  # Or any LLM supported by LiteLLM
     embedder="text-embedding-3-large",  # Or any embedder supported by LiteLLM
+)
+
+# Example 'local' config with a SQLite database (default) and a llama.cpp LLM:
+my_config = RAGLiteConfig(
+    db_url="sqlite:///raglite.db",  # SQLite is now the default database
+    llm="llama-cpp-python/unsloth/Qwen3-8B-GGUF/*Q4_K_M.gguf@8192",
+    embedder="llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512", # More than 512 tokens degrades bge-m3's performance
 )
 
 # Example 'local' config with a DuckDB database and a llama.cpp LLM:
@@ -349,6 +359,20 @@ The application is also deployable to [web](https://docs.chainlit.io/deploy/copi
 You can specify the database URL, LLM, and embedder directly in the Chainlit frontend, or with the CLI as follows:
 
 ```sh
+# SQLite is now the default, so no need to specify db-url
+raglite \
+    --llm llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192 \
+    --embedder llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512 \
+    chainlit
+
+# Or explicitly specify a SQLite database:
+raglite \
+    --db-url sqlite:///raglite.db \
+    --llm llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192 \
+    --embedder llama-cpp-python/lm-kit/bge-m3-gguf/*F16.gguf@512 \
+    chainlit
+
+# Or use DuckDB:
 raglite \
     --db-url duckdb:///raglite.db \
     --llm llama-cpp-python/unsloth/Qwen3-4B-GGUF/*Q4_K_M.gguf@8192 \
