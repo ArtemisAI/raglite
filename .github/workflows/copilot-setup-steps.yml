@@ -62,7 +62,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+          # No cache since we don't have package.json/lock files
 
       - name: Run tests
         run: |
