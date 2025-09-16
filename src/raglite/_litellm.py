@@ -26,13 +26,20 @@ from litellm.utils import custom_llm_setup
 
 from raglite._chatml_function_calling import chatml_function_calling_with_streaming
 from raglite._config import RAGLiteConfig
-from raglite._embedding_gpu import GPUAwareLlamaLLM
 from raglite._lazy_llama import (
     Llama,
     LlamaRAMCache,
     llama_supports_gpu_offload,
     llama_types,
 )
+
+# Optional import for GPU support
+try:
+    from raglite._embedding_gpu import GPUAwareLlamaLLM
+    _gpu_support_available = True
+except ImportError:
+    _gpu_support_available = False
+    GPUAwareLlamaLLM = None
 
 # Reduce the logging level for LiteLLM, flashrank, and httpx.
 litellm.suppress_debug_info = True
@@ -97,7 +104,7 @@ class LlamaCppPythonLLM(CustomLLM):
     @staticmethod
     def llm(model: str, embedding: bool = False, config: RAGLiteConfig | None = None) -> Llama:
         """
-        Create LLM instance with GPU support.
+        Create LLM instance with GPU support if available.
 
         Args:
             model: Model identifier
@@ -106,10 +113,20 @@ class LlamaCppPythonLLM(CustomLLM):
 
         Returns:
             Llama: Configured LLM instance
+
+        Raises:
+            ImportError: If GPU support is requested but llama-cpp-python is not installed
         """
         if config is None:
             from ._config import RAGLiteConfig
             config = RAGLiteConfig()
+
+        if not _gpu_support_available:
+            raise ImportError(
+                "GPU support requires llama-cpp-python. "
+                "Install with: pip install llama-cpp-python or "
+                "use uv sync without --no-dev to include GPU dependencies."
+            )
 
         return GPUAwareLlamaLLM.create(
             model=model,

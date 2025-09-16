@@ -2,7 +2,6 @@
 
 import logging
 from typing import Optional, Any
-from llama_cpp import Llama
 
 from ._config import RAGLiteConfig
 from ._gpu_utils import (
@@ -11,6 +10,7 @@ from ._gpu_utils import (
     calculate_optimal_gpu_layers,
     log_gpu_info
 )
+from ._lazy_llama import Llama
 
 logger = logging.getLogger(__name__)
 

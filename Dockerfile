@@ -1,18 +1,15 @@
 # syntax=docker/dockerfile:1
 FROM ghcr.io/astral-sh/uv:python3.10-bookworm AS dev
 
-# Install NVIDIA CUDA support and GPU utilities
-RUN --mount=type=cache,target=/var/cache/apt/ \
-    --mount=type=cache,target=/var/lib/apt/ \
+# Install CUDA toolkit for development (not drivers - those come from host)
+RUN --mount=type=cache,target=/var/cache/apt/ --mount=type=cache,target=/var/lib/apt/ \
     apt-get update && apt-get install --no-install-recommends --yes \
     wget gnupg2 software-properties-common && \
     wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
     apt-get update && apt-get install --no-install-recommends --yes \
-    cuda-toolkit-12-4 \
-    libnvidia-compute-550 \
-    nvidia-utils-550 \
-    && rm -f cuda-keyring_1.1-1_all.deb
+    cuda-toolkit-12-4 && \
+    rm -f cuda-keyring_1.1-1_all.deb
 
 # Create and activate a virtual environment [1].
 # [1] https://docs.astral.sh/uv/concepts/projects/config/#project-environment-path
