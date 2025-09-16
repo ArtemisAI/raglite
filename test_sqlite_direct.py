@@ -122,6 +122,8 @@ def test_sqlite_database_creation():
             print(f"ℹ️  sqlite-vec extension loading failed: {e}")
         
     finally:
+        if 'engine' in locals() and engine:
+            engine.dispose()
         if os.path.exists(db_path):
             os.unlink(db_path)
 

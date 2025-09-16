@@ -88,6 +88,8 @@ def test_enhanced_search_performance():
             print(f"✅ Retrieval of 100 embeddings completed in {retrieval_time:.4f} seconds")
             
     finally:
+        if 'engine' in locals() and engine:
+            engine.dispose()
         if os.path.exists(db_path):
             os.unlink(db_path)
 

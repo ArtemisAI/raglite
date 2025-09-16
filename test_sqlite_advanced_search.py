@@ -128,6 +128,8 @@ def test_sqlite_advanced_search():
         
     finally:
         # Cleanup
+        if 'engine' in locals() and engine:
+            engine.dispose()
         if os.path.exists(db_path):
             os.unlink(db_path)
 
@@ -185,6 +187,8 @@ def test_sqlite_hybrid_search():
         print("✅ SQLite hybrid search test completed")
         
     finally:
+        if 'engine' in locals() and engine:
+            engine.dispose()
         if os.path.exists(db_path):
             os.unlink(db_path)
 
