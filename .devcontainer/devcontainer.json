@@ -8,7 +8,7 @@
     },
     "overrideCommand": true,
     "remoteUser": "user",
-    "postStartCommand": "sudo chown -R user:user /opt/ && uv sync --python ${localEnv:PYTHON_VERSION:3.10} --resolution ${localEnv:RESOLUTION_STRATEGY:highest} --all-extras && pip install -r requirements.txt -r requirements-dev.txt && pre-commit install --install-hooks",
+    "postStartCommand": "chmod +x .devcontainer/setup-persistent.sh && .devcontainer/setup-persistent.sh",
     "customizations": {
         "jetbrains": {
             "backend": "PyCharm",
@@ -70,7 +70,11 @@
                 "ruff.importStrategy": "fromEnvironment",
                 "ruff.logLevel": "warning",
                 "terminal.integrated.env.linux": {
-                    "GIT_EDITOR": "code --wait"
+                    "GIT_EDITOR": "code --wait",
+                    "CUDA_HOME": "/usr/local/cuda-12.4",
+                    "LD_LIBRARY_PATH": "/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH}",
+                    "NVIDIA_VISIBLE_DEVICES": "all",
+                    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"
                 },
                 "terminal.integrated.env.mac": {
                     "GIT_EDITOR": "code --wait"

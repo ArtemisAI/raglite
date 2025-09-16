@@ -38,6 +38,7 @@ fastmcp>=2.0.0
 packaging>=23.0
 
 # GPU Support (optional)
+# Note: For GPU containers, use CUDA 12.4 compatible versions
 torch>=2.0.0
 llama-cpp-python>=0.2.0
 
