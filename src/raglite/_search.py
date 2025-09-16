@@ -20,7 +20,167 @@ from raglite._database import (
     create_database_engine,
 )
 from raglite._embed import embed_strings
-from raglite._typing import BasicSearchMethod, ChunkId, FloatVector
+from raglite._typing import BasicSearchMethod, ChunkId, FloatVector, DistanceMetric
+
+
+def _sqlite_vector_search(
+    query_embedding: FloatVector,
+    session: Session,
+    num_results: int,
+    oversample: int,
+    config: RAGLiteConfig,
+) -> tuple[list[ChunkId], list[float]]:
+    """SQLite-specific vector search with sqlite-vec integration and PyNNDescent fallback."""
+    import json
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    engine = session.get_bind()
+    sqlite_vec_available = getattr(engine, 'sqlite_vec_available', False)
+    
+    corrected_oversample = oversample * config.chunk_max_size / RAGLiteConfig.chunk_max_size
+    num_hits = round(corrected_oversample) * max(num_results, 10)
+    
+    if sqlite_vec_available:
+        # Use sqlite-vec for high-performance vector search
+        try:
+            return _sqlite_vec_search(query_embedding, session, num_results, num_hits, config)
+        except Exception as e:
+            logger.warning(f"sqlite-vec search failed, falling back to PyNNDescent: {e}")
+    
+    # Fallback to PyNNDescent for vector search
+    return _pynndescent_search(query_embedding, session, num_results, num_hits, config)
+
+
+def _sqlite_vec_search(
+    query_embedding: FloatVector,
+    session: Session,
+    num_results: int,
+    num_hits: int,
+    config: RAGLiteConfig,
+) -> tuple[list[ChunkId], list[float]]:
+    """High-performance vector search using sqlite-vec extension."""
+    import json
+    
+    # Convert query embedding to JSON for sqlite-vec
+    query_json = json.dumps(query_embedding.tolist())
+    
+    # Map distance metrics to sqlite-vec functions
+    metric_map = {
+        "cosine": "cosine",
+        "l2": "l2", 
+        "dot": "dot"
+    }
+    
+    if config.vector_search_distance_metric not in metric_map:
+        raise ValueError(f"Distance metric {config.vector_search_distance_metric} not supported by sqlite-vec")
+    
+    metric = metric_map[config.vector_search_distance_metric]
+    
+    # Use sqlite-vec for vector similarity search
+    statement = text(f"""
+        SELECT ce.chunk_id, 
+               vec_distance_{metric}(ce.embedding, :query_embedding) as distance
+        FROM chunk_embedding ce
+        ORDER BY distance
+        LIMIT :limit
+    """)
+    
+    try:
+        results = session.execute(statement, {
+            "query_embedding": query_json,
+            "limit": num_hits
+        }).fetchall()
+        
+        if not results:
+            return [], []
+        
+        # Group by chunk_id and get the best similarity for each chunk
+        chunk_scores = {}
+        for chunk_id, distance in results:
+            # Convert distance to similarity (higher is better)
+            similarity = 1.0 - distance if config.vector_search_distance_metric != "dot" else distance
+            chunk_scores[chunk_id] = max(chunk_scores.get(chunk_id, -float('inf')), similarity)
+        
+        # Sort by similarity and return top results
+        sorted_chunks = sorted(chunk_scores.items(), key=lambda x: x[1], reverse=True)[:num_results]
+        chunk_ids = [chunk_id for chunk_id, _ in sorted_chunks]
+        similarities = [similarity for _, similarity in sorted_chunks]
+        
+        return chunk_ids, similarities
+        
+    except Exception as e:
+        # If sqlite-vec functions aren't available, fall back to PyNNDescent
+        raise RuntimeError(f"sqlite-vec search failed: {e}")
+
+
+def _pynndescent_search(
+    query_embedding: FloatVector,
+    session: Session,
+    num_results: int,
+    num_hits: int,
+    config: RAGLiteConfig,
+) -> tuple[list[ChunkId], list[float]]:
+    """Fallback vector search using PyNNDescent for compatibility."""
+    import json
+    from typing import cast
+    
+    try:
+        import pynndescent
+    except ImportError:
+        raise ImportError("PyNNDescent is required for SQLite vector search fallback. Install with: pip install pynndescent")
+    
+    # Fetch all embeddings from database
+    statement = select(ChunkEmbedding.chunk_id, ChunkEmbedding.embedding)
+    db_results = session.exec(statement).all()
+    
+    if not db_results:
+        return [], []
+    
+    # Extract embeddings and chunk IDs
+    chunk_ids_all = [result.chunk_id for result in db_results]
+    embeddings_all = np.vstack([result.embedding for result in db_results])
+    
+    # Build or load PyNNDescent index
+    metric_map = {
+        "cosine": "cosine",
+        "l2": "euclidean",
+        "dot": "dot"
+    }
+    
+    metric = metric_map.get(config.vector_search_distance_metric, "cosine")
+    
+    # Create index with appropriate parameters for performance
+    index = pynndescent.NNDescent(
+        embeddings_all,
+        metric=metric,
+        n_neighbors=min(num_hits * 2, len(embeddings_all)),
+        random_state=42
+    )
+    
+    # Search for similar vectors
+    indices, distances = index.query([query_embedding], k=min(num_hits, len(embeddings_all)))
+    indices = indices[0]  # Extract first (and only) query result
+    distances = distances[0]
+    
+    # Group by chunk_id and get the best similarity for each chunk
+    chunk_scores = {}
+    for idx, distance in zip(indices, distances):
+        chunk_id = chunk_ids_all[idx]
+        # Convert distance to similarity (higher is better)
+        if metric == "dot":
+            similarity = distance  # For dot product, higher is better
+        else:
+            similarity = 1.0 - distance  # For cosine and euclidean, lower distance is better
+        
+        chunk_scores[chunk_id] = max(chunk_scores.get(chunk_id, -float('inf')), similarity)
+    
+    # Sort by similarity and return top results
+    sorted_chunks = sorted(chunk_scores.items(), key=lambda x: x[1], reverse=True)[:num_results]
+    chunk_ids_result = [chunk_id for chunk_id, _ in sorted_chunks]
+    similarities = [similarity for _, similarity in sorted_chunks]
+    
+    return chunk_ids_result, similarities
 
 
 def vector_search(
@@ -43,27 +203,33 @@ def vector_search(
         and (Q := IndexMetadata.get("default", config=config).get("query_adapter")) is not None  # noqa: N806
     ):
         query_embedding = (Q @ query_embedding).astype(query_embedding.dtype)
-    # Rank the chunks by relevance according to the L∞ norm of the similarities of the multi-vector
-    # chunk embeddings to the query embedding with a single query.
+    
+    # Use database-specific vector search implementation
     with Session(create_database_engine(config)) as session:
-        corrected_oversample = oversample * config.chunk_max_size / RAGLiteConfig.chunk_max_size
-        num_hits = round(corrected_oversample) * max(num_results, 10)
-        dist = ChunkEmbedding.embedding.distance(  # type: ignore[attr-defined]
-            query_embedding, metric=config.vector_search_distance_metric
-        ).label("dist")
-        sim = (1.0 - dist).label("sim")
-        top_vectors = select(ChunkEmbedding.chunk_id, sim).order_by(dist).limit(num_hits).subquery()
-        sim_norm = func.max(top_vectors.c.sim).label("sim_norm")
-        statement = (
-            select(top_vectors.c.chunk_id, sim_norm)
-            .group_by(top_vectors.c.chunk_id)
-            .order_by(sim_norm.desc())
-            .limit(num_results)
-        )
-        rows = session.exec(statement).all()
-        chunk_ids = [row[0] for row in rows]
-        similarity = [float(row[1]) for row in rows]
-    return chunk_ids, similarity
+        dialect = session.get_bind().dialect.name
+        if dialect == "sqlite":
+            # Use enhanced SQLite vector search
+            return _sqlite_vector_search(query_embedding, session, num_results, oversample, config)
+        else:
+            # Use existing implementation for other databases
+            corrected_oversample = oversample * config.chunk_max_size / RAGLiteConfig.chunk_max_size
+            num_hits = round(corrected_oversample) * max(num_results, 10)
+            dist = ChunkEmbedding.embedding.distance(  # type: ignore[attr-defined]
+                query_embedding, metric=config.vector_search_distance_metric
+            ).label("dist")
+            sim = (1.0 - dist).label("sim")
+            top_vectors = select(ChunkEmbedding.chunk_id, sim).order_by(dist).limit(num_hits).subquery()
+            sim_norm = func.max(top_vectors.c.sim).label("sim_norm")
+            statement = (
+                select(top_vectors.c.chunk_id, sim_norm)
+                .group_by(top_vectors.c.chunk_id)
+                .order_by(sim_norm.desc())
+                .limit(num_results)
+            )
+            rows = session.exec(statement).all()
+            chunk_ids = [row[0] for row in rows]
+            similarity = [float(row[1]) for row in rows]
+            return chunk_ids, similarity
 
 
 def keyword_search(
@@ -169,6 +335,18 @@ def hybrid_search(  # noqa: PLR0913
     config: RAGLiteConfig | None = None,
 ) -> tuple[list[ChunkId], list[float]]:
     """Search chunks by combining ANN vector search with BM25 keyword search."""
+    config = config or RAGLiteConfig()
+    
+    # Check if we're using SQLite and can optimize the hybrid search
+    with Session(create_database_engine(config)) as session:
+        dialect = session.get_bind().dialect.name
+        if dialect == "sqlite":
+            return _sqlite_hybrid_search(
+                query, session, num_results, oversample, 
+                vector_search_weight, keyword_search_weight, config
+            )
+    
+    # Use standard hybrid search for other databases
     # Run both searches.
     vs_chunk_ids, _ = vector_search(query, num_results=oversample * num_results, config=config)
     ks_chunk_ids, _ = keyword_search(query, num_results=oversample * num_results, config=config)
@@ -178,6 +356,98 @@ def hybrid_search(  # noqa: PLR0913
     )
     chunk_ids, hybrid_score = chunk_ids[:num_results], hybrid_score[:num_results]
     return chunk_ids, hybrid_score
+
+
+def _sqlite_hybrid_search(
+    query: str,
+    session: Session,
+    num_results: int,
+    oversample: int,
+    vector_search_weight: float,
+    keyword_search_weight: float,
+    config: RAGLiteConfig,
+) -> tuple[list[ChunkId], list[float]]:
+    """Optimized hybrid search specifically for SQLite with performance enhancements."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get query embedding for vector search
+    from raglite._embed import embed_strings
+    query_embedding = embed_strings([query], config=config)[0, :]
+    
+    # Apply the query adapter to the query embedding if configured
+    if (
+        config.vector_search_query_adapter
+        and (Q := IndexMetadata.get("default", config=config).get("query_adapter")) is not None  # noqa: N806
+    ):
+        query_embedding = (Q @ query_embedding).astype(query_embedding.dtype)
+    
+    expanded_results = oversample * num_results
+    
+    # Run vector search
+    try:
+        vs_chunk_ids, vs_scores = _sqlite_vector_search(
+            query_embedding, session, expanded_results, oversample, config
+        )
+    except Exception as e:
+        logger.warning(f"Vector search failed: {e}")
+        vs_chunk_ids, vs_scores = [], []
+    
+    # Run keyword search  
+    try:
+        ks_chunk_ids, ks_scores = _sqlite_keyword_search(
+            query, session, expanded_results, config
+        )
+    except Exception as e:
+        logger.warning(f"Keyword search failed: {e}")
+        ks_chunk_ids, ks_scores = [], []
+    
+    # Combine the results with Reciprocal Rank Fusion (RRF)
+    chunk_ids, hybrid_score = reciprocal_rank_fusion(
+        [vs_chunk_ids, ks_chunk_ids], 
+        weights=[vector_search_weight, keyword_search_weight]
+    )
+    
+    # Return top results
+    return chunk_ids[:num_results], hybrid_score[:num_results]
+
+
+def _sqlite_keyword_search(
+    query: str,
+    session: Session,
+    num_results: int,
+    config: RAGLiteConfig,
+) -> tuple[list[ChunkId], list[float]]:
+    """SQLite-specific keyword search with FTS5 optimization."""
+    # Use FTS5 for keyword search in SQLite
+    try:
+        statement = text("""
+            SELECT chunk.id as chunk_id, bm25(chunk_fts) as score
+            FROM chunk_fts 
+            JOIN chunk ON chunk.id = chunk_fts.rowid
+            WHERE chunk_fts MATCH :query
+            ORDER BY score
+            LIMIT :limit
+        """)
+        results = session.execute(statement, params={"query": query, "limit": num_results})
+        results = list(results)
+        chunk_ids = [result.chunk_id for result in results]
+        keyword_score = [result.score for result in results]
+        return chunk_ids, keyword_score
+    except Exception:
+        # Fallback to simple LIKE search if FTS5 is not available
+        statement = text("""
+            SELECT id as chunk_id, 1.0 as score
+            FROM chunk
+            WHERE body LIKE '%' || :query || '%'
+            ORDER BY id
+            LIMIT :limit
+        """)
+        results = session.execute(statement, params={"query": query, "limit": num_results})
+        results = list(results)
+        chunk_ids = [result.chunk_id for result in results]
+        keyword_score = [result.score for result in results]
+        return chunk_ids, keyword_score
 
 
 def retrieve_chunks(

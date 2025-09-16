@@ -19,6 +19,111 @@ from raglite._split_chunks import split_chunks
 from raglite._split_sentences import split_sentences
 
 
+def _sqlite_post_insertion_processing(
+    session: Session,
+    all_results: list[tuple[Document, list[Chunk], list[list[ChunkEmbedding]]]],
+    config: RAGLiteConfig,
+) -> None:
+    """Optimized post-insertion processing for SQLite with bulk operations."""
+    import json
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    if not all_results:
+        return
+    
+    # Prepare bulk data for FTS5 and vector tables
+    fts_data = []
+    vector_data = []
+    
+    for doc, chunks, chunk_embeddings_list in all_results:
+        # Collect FTS5 data
+        for chunk in chunks:
+            fts_data.append({"chunk_id": chunk.id, "body": chunk.body})
+        
+        # Collect vector data
+        for chunk_embeddings in chunk_embeddings_list:
+            for chunk_embedding in chunk_embeddings:
+                vector_data.append({
+                    "chunk_id": chunk_embedding.chunk_id,
+                    "embedding": json.dumps(chunk_embedding.embedding.tolist())
+                })
+    
+    # Bulk update FTS5 index
+    if fts_data:
+        try:
+            # Check if FTS5 table exists
+            fts_exists = session.execute(text("""
+                SELECT COUNT(*) FROM sqlite_master 
+                WHERE type='table' AND name='chunk_fts'
+            """)).scalar()
+            
+            if fts_exists:
+                # Delete existing entries for these chunks first (for updates)
+                chunk_ids = [item["chunk_id"] for item in fts_data]
+                if chunk_ids:
+                    placeholders = ",".join(["?" for _ in chunk_ids])
+                    session.execute(text(f"""
+                        DELETE FROM chunk_fts WHERE chunk_id IN ({placeholders})
+                    """), chunk_ids)
+                
+                # Bulk insert FTS5 data
+                session.execute(text("""
+                    INSERT INTO chunk_fts (chunk_id, body) 
+                    VALUES (:chunk_id, :body)
+                """), fts_data)
+                
+                logger.info(f"Updated FTS5 index with {len(fts_data)} chunks")
+        except Exception as e:
+            logger.warning(f"FTS5 index update failed: {e}")
+    
+    # Bulk update vector index (for sqlite-vec)
+    if vector_data:
+        try:
+            # Check if vector table exists
+            vec_exists = session.execute(text("""
+                SELECT COUNT(*) FROM sqlite_master 
+                WHERE type='table' AND name='chunk_embeddings_vec'
+            """)).scalar()
+            
+            if vec_exists:
+                # Delete existing entries for these chunks first (for updates)
+                chunk_ids = [item["chunk_id"] for item in vector_data]
+                if chunk_ids:
+                    placeholders = ",".join(["?" for _ in chunk_ids])
+                    session.execute(text(f"""
+                        DELETE FROM chunk_embeddings_vec WHERE chunk_id IN ({placeholders})
+                    """), chunk_ids)
+                
+                # Bulk insert vector data
+                session.execute(text("""
+                    INSERT INTO chunk_embeddings_vec (chunk_id, embedding) 
+                    VALUES (:chunk_id, :embedding)
+                """), vector_data)
+                
+                logger.info(f"Updated vector index with {len(vector_data)} embeddings")
+        except Exception as e:
+            logger.warning(f"Vector index update failed: {e}")
+    
+    # Commit all changes
+    try:
+        session.commit()
+        
+        # Optimize database after bulk operations
+        if len(all_results) >= 10:  # Only optimize for larger batches
+            try:
+                session.execute(text("PRAGMA optimize"))
+                logger.info("Database optimization completed")
+            except Exception as e:
+                logger.warning(f"Database optimization failed: {e}")
+                
+    except Exception as e:
+        logger.error(f"Post-insertion processing failed: {e}")
+        session.rollback()
+        raise
+
+
 def _create_chunk_records(
     document: Document, config: RAGLiteConfig
 ) -> tuple[Document, list[Chunk], list[list[ChunkEmbedding]]]:
@@ -188,26 +293,5 @@ def insert_documents(  # noqa: C901
             session.commit()
             session.execute(text("CHECKPOINT;"))
         elif engine.dialect.name == "sqlite":
-            # Update FTS5 index for SQLite and rebuild/refresh vector index if needed
-            try:
-                # For FTS5, insert or update chunk content
-                for doc, chunks, _ in all_results:
-                    for chunk in chunks:
-                        session.execute(text("""
-                            INSERT OR REPLACE INTO chunk_fts (id, body)
-                            VALUES (:id, :body)
-                        """), {"id": chunk.id, "body": chunk.body})
-                
-                # For vector table, insert embeddings
-                for doc, chunks, chunk_embeddings_list in all_results:
-                    for chunk_embeddings in chunk_embeddings_list:
-                        for chunk_embedding in chunk_embeddings:
-                            session.execute(text("""
-                                INSERT OR REPLACE INTO chunk_embeddings_vec (id, embedding)
-                                VALUES (:id, :embedding)
-                            """), {"id": chunk_embedding.chunk_id, "embedding": chunk_embedding.embedding.tolist()})
-                
-                session.commit()
-            except Exception:
-                # If FTS5 or vector tables don't exist, continue silently
-                pass
+            # Optimized SQLite post-insertion processing
+            _sqlite_post_insertion_processing(session, all_results, config)

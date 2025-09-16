@@ -679,34 +679,58 @@ def create_database_engine(config: RAGLiteConfig | None = None) -> Engine:  # no
                 logging.warning(f"Could not create FTS5 index: {e}. Keyword search will not be available.")
             
             # Create virtual table for vector search using sqlite-vec
-            try:
-                session.execute(text(f"""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings_vec 
-                    USING vec0(
-                        chunk_id TEXT PRIMARY KEY,
-                        embedding FLOAT[{embedding_dim}]
-                    )
-                """))
-                
-                # Populate vector table with existing embeddings
-                num_embeddings = session.execute(text("SELECT COUNT(*) FROM chunk_embedding")).scalar_one()
-                if num_embeddings > 0:
-                    try:
-                        num_indexed_embeddings = session.execute(
-                            text("SELECT COUNT(*) FROM chunk_embeddings_vec")
-                        ).scalar_one()
-                    except Exception:
-                        num_indexed_embeddings = 0
-                        
-                    if num_indexed_embeddings != num_embeddings:
-                        session.execute(text("DELETE FROM chunk_embeddings_vec"))
-                        # Note: Need to implement proper embedding serialization
-                        # This will be handled in the insertion pipeline
-                        
-            except Exception as e:
-                # sqlite-vec extension might not be available, log warning but continue
-                import logging
-                logging.warning(f"Could not create vector index: {e}. Vector search will not be available.")
+            if sqlite_vec_available:
+                try:
+                    # Create vec0 virtual table for high-performance vector search
+                    session.execute(text(f"""
+                        CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings_vec 
+                        USING vec0(
+                            chunk_id TEXT PRIMARY KEY,
+                            embedding FLOAT[{embedding_dim}]
+                        )
+                    """))
+                    logger.info("✅ sqlite-vec virtual table created successfully")
+                    
+                    # Populate vector table with existing embeddings if needed
+                    num_embeddings = session.execute(text("SELECT COUNT(*) FROM chunk_embedding")).scalar_one()
+                    if num_embeddings > 0:
+                        try:
+                            num_indexed_embeddings = session.execute(
+                                text("SELECT COUNT(*) FROM chunk_embeddings_vec")
+                            ).scalar_one()
+                        except Exception:
+                            num_indexed_embeddings = 0
+                            
+                        if num_indexed_embeddings != num_embeddings:
+                            # Clear and repopulate vector table
+                            session.execute(text("DELETE FROM chunk_embeddings_vec"))
+                            
+                            # Insert embeddings from chunk_embedding table (using JSON deserialization)
+                            embeddings_data = session.execute(text("""
+                                SELECT chunk_id, embedding FROM chunk_embedding
+                            """)).fetchall()
+                            
+                            vec_data = []
+                            for chunk_id, embedding_json in embeddings_data:
+                                try:
+                                    # Parse JSON embedding and convert to vec0 format
+                                    import json
+                                    embedding_list = json.loads(embedding_json) if isinstance(embedding_json, str) else embedding_json.tolist()
+                                    vec_data.append({"chunk_id": chunk_id, "embedding": json.dumps(embedding_list)})
+                                except Exception as e:
+                                    logger.warning(f"Failed to process embedding for chunk {chunk_id}: {e}")
+                            
+                            if vec_data:
+                                session.execute(text("""
+                                    INSERT INTO chunk_embeddings_vec (chunk_id, embedding) 
+                                    VALUES (:chunk_id, :embedding)
+                                """), vec_data)
+                                logger.info(f"Populated vector table with {len(vec_data)} embeddings")
+                            
+                except Exception as e:
+                    logger.warning(f"Could not create/populate sqlite-vec table: {e}")
+            else:
+                logger.info("sqlite-vec not available, vector search will use PyNNDescent fallback")
             
             session.commit()
     return engine
