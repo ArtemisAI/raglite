@@ -14,10 +14,32 @@ echo "📍 Python version: $python_version"
 echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
 
-# Install with retry mechanism
+# Install core and development requirements
+echo "🔄 Installing from requirements files..."
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt || {
+        echo "⚠️  Core requirements install failed, trying individual packages..."
+        pip install sqlite-vec pynndescent torch llama-cpp-python faiss-cpu openai pandas
+    }
+else
+    echo "⚠️  requirements.txt not found, installing essential packages..."
+    pip install sqlite-vec pynndescent torch llama-cpp-python
+fi
+
+if [ -f "requirements-dev.txt" ]; then
+    pip install -r requirements-dev.txt || {
+        echo "⚠️  Dev requirements install failed, trying essential dev packages..."
+        pip install pytest mypy ruff pre-commit
+    }
+else
+    echo "⚠️  requirements-dev.txt not found, installing essential dev packages..."
+    pip install pytest mypy ruff
+fi
+
+# Install with retry mechanism for editable package
 echo "🔄 Installing package in development mode..."
-pip install -e .[dev,test] || {
-    echo "⚠️  Regular install failed, trying without dev extras..."
+pip install -e .[dev,gpu,bench] || {
+    echo "⚠️  Full install failed, trying basic development install..."
     pip install -e . || {
         echo "❌ Development install failed, trying production install..."
         pip install .

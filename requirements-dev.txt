@@ -1,0 +1,24 @@
+# Development dependencies for raglite
+# Testing and quality
+commitizen>=4.3.0
+coverage[toml]>=7.6.10
+pytest>=8.3.4
+pytest-mock>=3.14.0
+pytest-xdist>=3.6.1
+mypy>=1.14.1
+ruff>=0.10.0
+typeguard>=4.4.1
+
+# Development tools
+pre-commit>=4.0.1
+poethepoet>=0.32.1
+pdoc>=15.0.1
+
+# Interactive development
+ipykernel>=6.29.4
+ipython>=8.18.0
+ipywidgets>=8.1.2
+
+# Benchmarking datasets
+ir-datasets>=0.5.11
+ir-measures>=0.4.1

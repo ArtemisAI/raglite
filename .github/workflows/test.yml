@@ -49,7 +49,7 @@ jobs:
       - name: Install SQLite dependencies in container
         run: |
           devcontainer exec --workspace-folder . \
-            pip install sqlite-vec pynndescent
+            pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run environment setup in container
         run: |
