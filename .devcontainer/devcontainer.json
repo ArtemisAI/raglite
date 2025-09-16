@@ -4,11 +4,17 @@
     "service": "devcontainer",
     "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}/",
     "features": {
-        "ghcr.io/devcontainers-extra/features/starship:1": {}
+        "ghcr.io/devcontainers-extra/features/starship:1": {},
+        // CUDA toolkit feature for GPU
+        "ghcr.io/devcontainers/features/cuda:1": {}
     },
     "overrideCommand": true,
     "remoteUser": "user",
-    "postStartCommand": "sudo chown -R user:user /opt/ && uv sync --python ${localEnv:PYTHON_VERSION:3.10} --resolution ${localEnv:RESOLUTION_STRATEGY:highest} --all-extras && pre-commit install --install-hooks",
+    // Mount host A: drive for Roo code access
+    "mounts": [
+        "source=/mnt/a,target=/mnt/a,type=bind"
+    ],
+    "postStartCommand": "sudo chown -R user:user /opt/ && uv sync --python ${localEnv:PYTHON_VERSION:3.10} --resolution ${localEnv:RESOLUTION_STRATEGY:highest} --all-extras && pip install gemini-cli && pre-commit install --install-hooks && echo '🔄 Installing Ollama...' && curl -fsSL https://ollama.ai/install.sh | sh && echo '📥 Pulling embedding models...' && (ollama pull nomic-embed-text || ollama pull all-minilm)",
     "customizations": {
         "jetbrains": {
             "backend": "PyCharm",
@@ -29,7 +35,12 @@
                 "ms-toolsai.jupyter",
                 "ryanluker.vscode-coverage-gutters",
                 "tamasfe.even-better-toml",
-                "visualstudioexptteam.vscodeintellicode"
+                "visualstudioexptteam.vscodeintellicode",
+                // Roo code CLIs (pinned to match host)
+                "RooVeterinaryInc.roo-cline@3.22.4",
+                // Model Context Protocol tools
+                "Upstash.context7-mcp",
+                "ms-azuretools.vscode-azure-mcp-server"
             ],
             "settings": {
                 "coverage-gutters.coverageFileNames": [
@@ -41,7 +52,7 @@
                 },
                 "editor.formatOnSave": true,
                 "[python]": {
-                    "editor.defaultFormatter": "charliermarsh.ruff"
+                    "editor.defaultFormatter": "ms-python.python"
                 },
                 "[toml]": {
                     "editor.formatOnSave": false
@@ -74,6 +85,12 @@
                 },
                 "terminal.integrated.env.mac": {
                     "GIT_EDITOR": "code --wait"
+                },
+                // Copilot: enable suggestions and inline completion
+                "github.copilot": {
+                    "enable": true,
+                    "autocomplete": true,
+                    "inlineSuggest": { "enable": true }
                 }
             }
         }

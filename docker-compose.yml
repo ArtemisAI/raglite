@@ -8,6 +8,11 @@ services:
       - OPENAI_API_KEY
     depends_on:
       - postgres
+    # Enable GPU access via NVIDIA Container Toolkit
+    device_requests:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
     volumes:
       - ..:/workspaces
       - command-history-volume:/home/user/.history/

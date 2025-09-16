@@ -14,15 +14,19 @@ echo "📍 Python version: $python_version"
 echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
 
-# Install with retry mechanism
-echo "🔄 Installing package in development mode..."
-pip install -e .[dev,test] || {
-    echo "⚠️  Regular install failed, trying without dev extras..."
-    pip install -e . || {
-        echo "❌ Development install failed, trying production install..."
+# Install package in development mode with GPU and test extras
+echo "🔄 Installing package in development mode (dev,test,gpu)..."
+pip install -e .[dev,test,gpu] || {
+    echo "⚠️  Install with GPU extras failed, retrying without gpu extras..."
+    pip install -e .[dev,test] || {
+        echo "⚠️  Install without GPU extras failed, trying production install..."
         pip install .
     }
 }
+
+# Install Gemini CLI for local tooling
+echo "⚙️  Installing gemini-cli..."
+pip install gemini-cli
 
 # Install SQLite dependencies with fallbacks
 echo "🗄️  Installing SQLite dependencies..."
