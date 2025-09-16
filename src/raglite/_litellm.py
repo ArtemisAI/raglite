@@ -26,6 +26,7 @@ from litellm.utils import custom_llm_setup
 
 from raglite._chatml_function_calling import chatml_function_calling_with_streaming
 from raglite._config import RAGLiteConfig
+from raglite._embedding_gpu import GPUAwareLlamaLLM
 from raglite._lazy_llama import (
     Llama,
     LlamaRAMCache,
@@ -94,58 +95,27 @@ class LlamaCppPythonLLM(CustomLLM):
     ]
 
     @staticmethod
-    @cache
-    def llm(model: str, **kwargs: Any) -> Llama:
-        # Drop the llama-cpp-python prefix from the model.
-        repo_id_filename = model.replace("llama-cpp-python/", "")
-        # Convert the LiteLLM model string to repo_id, filename, and n_ctx.
-        repo_id, filename = repo_id_filename.rsplit("/", maxsplit=1)
-        n_ctx = 0
-        if len(filename_n_ctx := filename.rsplit("@", maxsplit=1)) == 2:  # noqa: PLR2004
-            filename, n_ctx_str = filename_n_ctx
-            n_ctx = int(n_ctx_str)
-        # Load the LLM.
-        with (
-            contextlib.redirect_stderr(StringIO()),  # Filter spurious llama.cpp output.
-            warnings.catch_warnings(),  # Filter huggingface_hub warning about HF_TOKEN.
-        ):
-            warnings.filterwarnings("ignore", category=UserWarning)
-            llm = Llama.from_pretrained(
-                repo_id=repo_id,
-                filename=filename,
-                n_ctx=n_ctx,
-                n_gpu_layers=-1,
-                verbose=False,
-                # Enable function calling with streaming.
-                chat_handler=chatml_function_calling_with_streaming,
-                # Workaround to enable long context embedding models [1].
-                # [1] https://github.com/abetlen/llama-cpp-python/issues/1762
-                n_batch=n_ctx if n_ctx > 0 else 1024,
-                n_ubatch=n_ctx if n_ctx > 0 else 1024,
-                **kwargs,
-            )
-        # Enable caching.
-        if llama_supports_gpu_offload() or (os.cpu_count() or 1) >= 8:  # noqa: PLR2004
-            llm.set_cache(LlamaRAMCache())
-        # Register the model info with LiteLLM.
-        model_info = {
-            repo_id_filename: {
-                "max_tokens": llm.n_ctx(),
-                "max_input_tokens": llm.n_ctx(),
-                "max_output_tokens": None,
-                "input_cost_per_token": 0.0,
-                "output_cost_per_token": 0.0,
-                "output_vector_size": llm.n_embd() if kwargs.get("embedding") else None,
-                "litellm_provider": "llama-cpp-python",
-                "mode": "embedding" if kwargs.get("embedding") else "completion",
-                "supported_openai_params": LlamaCppPythonLLM.supported_openai_params,
-                "supports_function_calling": True,
-                "supports_parallel_function_calling": True,
-                "supports_vision": False,
-            }
-        }
-        litellm.register_model(model_info)  # type: ignore[attr-defined]
-        return llm
+    def llm(model: str, embedding: bool = False, config: RAGLiteConfig | None = None) -> Llama:
+        """
+        Create LLM instance with GPU support.
+
+        Args:
+            model: Model identifier
+            embedding: Whether for embedding generation
+            config: RAGLite configuration (optional, will use default if None)
+
+        Returns:
+            Llama: Configured LLM instance
+        """
+        if config is None:
+            from ._config import RAGLiteConfig
+            config = RAGLiteConfig()
+
+        return GPUAwareLlamaLLM.create(
+            model=model,
+            config=config,
+            embedding=embedding
+        )
 
     def _translate_openai_params(self, optional_params: dict[str, Any]) -> dict[str, Any]:
         # Filter out unsupported OpenAI parameters.

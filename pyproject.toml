@@ -84,6 +84,10 @@ rerank = [
   "langdetect (>=1.0.9)",
   "rerankers[api,flashrank] (>=0.10.0)",
 ]
+gpu = [
+  "torch>=2.0.0",              # GPU detection and management
+  "llama-cpp-python>=0.2.0",   # GPU-enabled LlamaCpp
+]
 # Evaluation:
 ragas = ["pandas (>=2.1.1)", "ragas (>=0.1.12)"]
 # Benchmarking:
@@ -134,7 +138,7 @@ warn_unreachable = true
 [tool.pytest.ini_options]  # https://docs.pytest.org/en/latest/reference/reference.html#ini-options-ref
 addopts = "--color=yes --doctest-modules --ignore=src/raglite/_chainlit.py --exitfirst --failed-first --strict-config --strict-markers --verbosity=2 --junitxml=reports/pytest.xml"
 filterwarnings = ["error", "ignore::DeprecationWarning", "ignore::pytest.PytestUnraisableExceptionWarning"]
-markers = ["slow: mark test as slow"]
+markers = ["slow: mark test as slow", "benchmark: mark test as benchmark"]
 testpaths = ["src", "tests"]
 xfail_strict = true
 

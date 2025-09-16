@@ -24,25 +24,25 @@ def _detect_gpu_support() -> bool:
         return False
     if os.getenv("RAGLITE_FORCE_GPU", "").lower() in ("1", "true", "yes"):
         return True
-    
+
     # Check for CUDA environment variables (commonly set in GPU environments)
     cuda_vars = ["CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "OLLAMA_CUDA_SUPPORT"]
     if any(os.getenv(var) for var in cuda_vars):
         return True
-    
+
     # Try to detect nvidia-smi (indicates NVIDIA GPU driver presence)
     try:
         import subprocess
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
-            capture_output=True, 
-            text=True, 
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
             timeout=5
         )
         return result.returncode == 0 and result.stdout.strip()
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         pass
-    
+
     # Fallback to llama-cpp-python detection if available
     try:
         return llama_supports_gpu_offload()
@@ -146,4 +146,19 @@ class RAGLiteConfig:
     )
     # Search config: you can pick any search method that returns (list[ChunkId], list[float]),
     # list[Chunk], or list[ChunkSpan].
+    # GPU Configuration Options
+    gpu_enabled: bool = True
+    """Enable GPU acceleration when available."""
+
+    gpu_layers: int | None = None
+    """Number of layers to offload to GPU. If None, auto-detect optimal value."""
+
+    gpu_memory_fraction: float = 0.8
+    """Fraction of GPU memory to use (0.1-1.0)."""
+
+    gpu_fallback_enabled: bool = True
+    """Enable automatic fallback to CPU if GPU fails."""
+
+    cpu_threads: int | None = None
+    """Number of CPU threads for CPU-only mode. If None, auto-detect."""
     search_method: SearchMethod = field(default=_vector_search, compare=False)
