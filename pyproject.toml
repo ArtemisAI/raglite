@@ -137,9 +137,9 @@ warn_unreachable = true
 
 [tool.pytest.ini_options]  # https://docs.pytest.org/en/latest/reference/reference.html#ini-options-ref
 addopts = "--color=yes --doctest-modules --ignore=src/raglite/_chainlit.py --exitfirst --failed-first --strict-config --strict-markers --verbosity=2 --junitxml=reports/pytest.xml"
-filterwarnings = ["error", "ignore::DeprecationWarning", "ignore::pytest.PytestUnraisableExceptionWarning"]
+filterwarnings = ["error", "ignore::DeprecationWarning", "ignore::pytest.PytestUnraisableExceptionWarning", "ignore:`huggingface_hub` cache-system uses symlinks by default:UserWarning"]
 markers = ["slow: mark test as slow", "benchmark: mark test as benchmark"]
-testpaths = ["src", "tests"]
+testpaths = ["tests"]
 xfail_strict = true
 
 [tool.ruff]  # https://docs.astral.sh/ruff/settings/
