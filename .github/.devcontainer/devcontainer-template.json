@@ -1,0 +1,27 @@
+{
+  "name": "RAGLite GPU Development",
+  "description": "GPU-accelerated development environment for RAGLite with NVIDIA CUDA support",
+  "documentationURL": "https://github.com/SuperDuperDB/raglite/blob/main/.github/CODESPACES_GPU_SETUP.md",
+  "options": {
+    "cudaVersion": {
+      "type": "string",
+      "description": "CUDA version to install",
+      "proposals": ["12.4", "12.2", "11.8"],
+      "default": "12.4"
+    },
+    "pythonVersion": {
+      "type": "string", 
+      "description": "Python version",
+      "proposals": ["3.11", "3.10", "3.9"],
+      "default": "3.10"
+    },
+    "enableGpuSupport": {
+      "type": "boolean",
+      "description": "Enable GPU acceleration features",
+      "default": true
+    }
+  },
+  "platforms": ["linux"],
+  "publisher": "RAGLite",
+  "version": "1.0.0"
+}

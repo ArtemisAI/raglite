@@ -106,23 +106,75 @@ ollama pull nomic-embed-text || {
 
 # Check GPU support
 echo "🔍 Checking GPU support..."
+export RAGLITE_GPU_ENABLED="false"
+export OLLAMA_CUDA_SUPPORT="false"
+
 if command -v nvidia-smi &> /dev/null; then
     echo "🎮 NVIDIA GPU detected"
-    nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
+    nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null || {
+        echo "⚠️  nvidia-smi found but not working - may be in container without GPU access"
+    }
     export OLLAMA_CUDA_SUPPORT=true
-    echo "✅ GPU support enabled for Ollama"
+    export RAGLITE_GPU_ENABLED="true"
+    echo "✅ GPU support enabled for Ollama and RAGLite"
 
     # Check CUDA availability
     if command -v nvcc &> /dev/null; then
         echo "🔧 CUDA toolkit detected"
         nvcc --version | grep "release"
+        export CUDA_AVAILABLE="true"
     else
-        echo "⚠️  CUDA toolkit not found - GPU acceleration may be limited"
+        echo "⚠️  CUDA toolkit not found - checking if CUDA libs are available"
+        if [ -d "/usr/local/cuda" ] || [ -d "/usr/local/cuda-12.4" ]; then
+            echo "✅ CUDA libraries found"
+            export CUDA_AVAILABLE="true"
+        else
+            echo "⚠️  CUDA not found - GPU acceleration may be limited"
+            export CUDA_AVAILABLE="false"
+        fi
     fi
+    
+    # Install GPU-enabled PyTorch for Codespaces/container environments
+    echo "🚀 Installing GPU-enabled PyTorch..."
+    pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 || {
+        echo "⚠️  GPU PyTorch install failed, falling back to CPU version"
+        pip install torch torchvision torchaudio
+        export RAGLITE_GPU_ENABLED="false"
+    }
+    
+    # Install GPU-enabled llama-cpp-python
+    echo "🦙 Installing GPU-enabled llama-cpp-python..."
+    CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir || {
+        echo "⚠️  GPU llama-cpp-python install failed, falling back to CPU version"
+        pip install llama-cpp-python --force-reinstall --no-cache-dir
+    }
+    
+elif python3 -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    echo "🔥 PyTorch reports CUDA is available (container GPU support)"
+    export RAGLITE_GPU_ENABLED="true"
+    export OLLAMA_CUDA_SUPPORT="true"
+    export CUDA_AVAILABLE="true"
+    echo "✅ Container GPU support detected"
 else
     echo "💻 No NVIDIA GPU detected, using CPU mode"
     export OLLAMA_CUDA_SUPPORT=false
+    export RAGLITE_GPU_ENABLED="false"
+    export CUDA_AVAILABLE="false"
 fi
+
+# Set environment variables in bashrc for persistence
+echo "📝 Setting persistent environment variables..."
+{
+    echo "export RAGLITE_GPU_ENABLED='$RAGLITE_GPU_ENABLED'"
+    echo "export OLLAMA_CUDA_SUPPORT='$OLLAMA_CUDA_SUPPORT'"
+    echo "export CUDA_AVAILABLE='$CUDA_AVAILABLE'"
+    if [ "$CUDA_AVAILABLE" = "true" ]; then
+        echo "export CUDA_HOME='/usr/local/cuda-12.4'"
+        echo "export PATH='/usr/local/cuda-12.4/bin:\$PATH'"
+        echo "export LD_LIBRARY_PATH='/usr/local/cuda-12.4/lib64:\$LD_LIBRARY_PATH'"
+    fi
+} >> ~/.bashrc
 
 # Validate SQLite-vec
 echo "🔍 Validating SQLite-vec installation..."
@@ -192,9 +244,47 @@ config = RAGLiteConfig()
 print(f'✅ Config created with database: {config.db_url}')
 "
 
-echo "🎉 Environment setup complete!"
+# GPU validation if enabled
+if [ "$RAGLITE_GPU_ENABLED" = "true" ]; then
+    echo "🔥 Running GPU validation..."
+    python3 -c "
+import torch
+print('🚀 PyTorch version:', torch.__version__)
+print('� CUDA available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('📱 GPU count:', torch.cuda.device_count())
+    for i in range(torch.cuda.device_count()):
+        print(f'   - GPU {i}: {torch.cuda.get_device_name(i)}')
+        props = torch.cuda.get_device_properties(i)
+        print(f'     Memory: {props.total_memory / 1024**3:.1f}GB')
+else:
+    print('⚠️  CUDA not available in PyTorch')
+
+# Test llama-cpp-python
+try:
+    import llama_cpp
+    print('🦙 llama-cpp-python available:', hasattr(llama_cpp, '__version__'))
+except ImportError:
+    print('⚠️  llama-cpp-python not available')
+"
+fi
+
+echo "�🎉 Environment setup complete!"
+echo ""
+echo "🌟 Environment Summary:"
+echo "  GPU Enabled: $RAGLITE_GPU_ENABLED"
+echo "  CUDA Available: $CUDA_AVAILABLE"
+echo "  Ollama CUDA: $OLLAMA_CUDA_SUPPORT"
+if [ "$RAGLITE_ENV" = "codespaces" ]; then
+    echo "  Environment: GitHub Codespaces"
+else
+    echo "  Environment: Local Development"
+fi
 echo ""
 echo "📋 Next steps:"
 echo "  1. Run tests: pytest tests/ -v"
 echo "  2. Test SQLite backend: python tests/test_sqlite_backend.py"
-echo "  3. Start development: python -m raglite --help"
+if [ -f "scripts/verify_gpu_setup.py" ]; then
+    echo "  3. Verify GPU setup: python scripts/verify_gpu_setup.py"
+fi
+echo "  4. Start development: python -m raglite --help"

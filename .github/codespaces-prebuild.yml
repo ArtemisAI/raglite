@@ -1,0 +1,96 @@
+# GitHub Codespaces Prebuild Configuration
+# This file configures automatic prebuild of the RAGLite development environment
+
+# Define prebuild triggers
+prebuild:
+  # Trigger prebuild on changes to development configuration
+  paths:
+    - ".github/.devcontainer/**"
+    - ".devcontainer/**" 
+    - "requirements*.txt"
+    - "pyproject.toml"
+    - "Dockerfile"
+    - "docker-compose*.yml"
+    - ".github/setup-environment.sh"
+  
+  # Prebuild on schedule (weekly)
+  schedule:
+    - cron: "0 3 * * 1"  # Monday 3 AM UTC
+  
+  # Prebuild configuration
+  template: ".github/.devcontainer/devcontainer.json"
+  
+  # Machine types to prebuild for
+  machines:
+    - "basicLinux32gb"    # Standard development
+    - "premiumLinux"      # GPU-capable when available
+  
+  # Environment variables for prebuild
+  env:
+    RAGLITE_PREBUILD: "true"
+    SKIP_GPU_INSTALL: "false"
+    PYTHONDONTWRITEBYTECODE: "1"
+
+# Codespace settings
+codespace:
+  # Default machine type
+  machine: "basicLinux32gb"
+  
+  # Request GPU when available
+  hostRequirements:
+    gpu: optional
+  
+  # Timeout settings
+  idleTimeoutMinutes: 60
+  
+  # Default editor
+  editor: "code"
+  
+  # Extensions to pre-install
+  extensions:
+    - "GitHub.copilot"
+    - "GitHub.copilot-chat" 
+    - "ms-python.python"
+    - "charliermarsh.ruff"
+    - "ms-toolsai.jupyter"
+
+# Development settings
+development:
+  # Port forwarding
+  forwardPorts:
+    - 8000   # RAGLite server
+    - 8080   # Development server  
+    - 8888   # Jupyter
+  
+  # Working directory
+  workspaceMount: "source=${localWorkspaceFolder},target=/workspaces/raglite,type=bind"
+  
+  # Post-create hooks
+  postCreateCommand: |
+    echo "🚀 RAGLite Codespace Setup Starting..."
+    chmod +x .github/setup-environment.sh
+    .github/setup-environment.sh
+    echo "✅ RAGLite Codespace Ready!"
+  
+  # Environment persistence
+  mounts:
+    - "source=raglite-venv,target=/opt/venv,type=volume"
+    - "source=raglite-models,target=/home/vscode/.cache,type=volume"
+    - "source=raglite-data,target=/workspaces/raglite/data,type=volume"
+
+# Resource configuration
+resources:
+  # Memory limits
+  memory: "8gb"
+  
+  # CPU cores
+  cpus: 4
+  
+  # Disk space
+  disk: "32gb"
+  
+  # GPU settings (when available)
+  gpu:
+    enabled: true
+    type: "nvidia"
+    memory: "4gb"

@@ -1,0 +1,115 @@
+{
+    "name": "RAGLite GPU Development (Codespaces)",
+    "image": "mcr.microsoft.com/devcontainers/python:3.10-bullseye",
+    "features": {
+        "ghcr.io/devcontainers/features/nvidia-cuda:1": {
+            "version": "12.4",
+            "cudnn": true,
+            "installToolkit": true
+        },
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        "ghcr.io/devcontainers-extra/features/starship:1": {}
+    },
+    "containerEnv": {
+        "CUDA_HOME": "/usr/local/cuda-12.4",
+        "PATH": "${PATH}:/usr/local/cuda-12.4/bin",
+        "LD_LIBRARY_PATH": "/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH}",
+        "NVIDIA_VISIBLE_DEVICES": "all",
+        "NVIDIA_DRIVER_CAPABILITIES": "compute,utility",
+        "RAGLITE_ENV": "codespaces",
+        "PYTHONPATH": "/workspaces/raglite/src:${PYTHONPATH}"
+    },
+    "mounts": [
+        "source=raglite-models,target=/home/vscode/.cache/huggingface,type=volume",
+        "source=raglite-venv,target=/opt/venv,type=volume"
+    ],
+    "postCreateCommand": "chmod +x .github/setup-environment.sh && .github/setup-environment.sh",
+    "postStartCommand": "echo '🚀 RAGLite GPU-enabled Codespace ready!' && python scripts/verify_gpu_setup.py || echo '⚠️ GPU verification script not found, run: python -c \"import torch; print(f\"CUDA: {torch.cuda.is_available()}\")'\"",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "charliermarsh.ruff",
+                "GitHub.copilot",
+                "GitHub.copilot-chat",
+                "GitHub.vscode-github-actions",
+                "GitHub.vscode-pull-request-github",
+                "ms-azuretools.vscode-docker",
+                "ms-python.mypy-type-checker",
+                "ms-python.python",
+                "ms-toolsai.jupyter",
+                "ryanluker.vscode-coverage-gutters",
+                "tamasfe.even-better-toml",
+                "visualstudioexptteam.vscodeintellicode",
+                "nvidia.nsight-vscode-edition"
+            ],
+            "settings": {
+                "coverage-gutters.coverageFileNames": [
+                    "reports/coverage.xml"
+                ],
+                "editor.codeActionsOnSave": {
+                    "source.fixAll": "explicit",
+                    "source.organizeImports": "explicit"
+                },
+                "editor.formatOnSave": true,
+                "[python]": {
+                    "editor.defaultFormatter": "ms-python.python",
+                    "editor.codeActionsOnSave": {
+                        "source.organizeImports": "explicit",
+                        "source.fixAll": "explicit"
+                    }
+                },
+                "[toml]": {
+                    "editor.formatOnSave": false
+                },
+                "editor.rulers": [100],
+                "files.autoSave": "onFocusChange",
+                "github.copilot.chat.agent.enabled": true,
+                "github.copilot.chat.codesearch.enabled": true,
+                "github.copilot.chat.edits.enabled": true,
+                "github.copilot.nextEditSuggestions.enabled": true,
+                "jupyter.kernels.excludePythonEnvironments": [
+                    "/usr/local/bin/python"
+                ],
+                "mypy-type-checker.importStrategy": "fromEnvironment",
+                "mypy-type-checker.preferDaemon": true,
+                "notebook.codeActionsOnSave": {
+                    "notebook.source.fixAll": "explicit",
+                    "notebook.source.organizeImports": "explicit"
+                },
+                "notebook.formatOnSave.enabled": true,
+                "python.defaultInterpreterPath": "/opt/venv/bin/python",
+                "python.terminal.activateEnvironment": false,
+                "python.testing.pytestEnabled": true,
+                "ruff.importStrategy": "fromEnvironment",
+                "ruff.logLevel": "warning",
+                "terminal.integrated.env.linux": {
+                    "GIT_EDITOR": "code --wait",
+                    "CUDA_HOME": "/usr/local/cuda-12.4",
+                    "LD_LIBRARY_PATH": "/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH}",
+                    "NVIDIA_VISIBLE_DEVICES": "all",
+                    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility",
+                    "RAGLITE_ENV": "codespaces"
+                }
+            }
+        }
+    },
+    "forwardPorts": [8000, 8080, 8888],
+    "portsAttributes": {
+        "8000": {
+            "label": "RAGLite Server",
+            "protocol": "http"
+        },
+        "8080": {
+            "label": "Development Server",
+            "protocol": "http"
+        },
+        "8888": {
+            "label": "Jupyter Lab",
+            "protocol": "http"
+        }
+    },
+    "hostRequirements": {
+        "gpu": "optional"
+    }
+}
