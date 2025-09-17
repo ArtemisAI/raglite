@@ -11,8 +11,7 @@
     },
     "runArgs": [
         "--gpus",
-        "all",
-        "--runtime=nvidia"
+        "all"
     ],
     "containerEnv": {
         "NVIDIA_VISIBLE_DEVICES": "all",
@@ -30,7 +29,8 @@
     ],
     "overrideCommand": true,
     "remoteUser": "user",
-    "postStartCommand": "chmod +x .devcontainer/setup-persistent.sh && .devcontainer/setup-persistent.sh",
+    "postCreateCommand": "chmod +x .devcontainer/setup-persistent.sh && .devcontainer/setup-persistent.sh",
+    "postStartCommand": "echo '🚀 RAGLite DevContainer ready! GPU Status:' && (nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'No GPU detected')",
     "customizations": {
         "jetbrains": {
             "backend": "PyCharm",

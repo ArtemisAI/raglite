@@ -1,15 +1,16 @@
 # syntax=docker/dockerfile:1
 FROM ghcr.io/astral-sh/uv:python3.10-bookworm AS dev
 
-# Install CUDA toolkit for development (not drivers - those come from host)
+# Install CUDA toolkit for development (optional - graceful fallback for non-GPU systems)
 RUN --mount=type=cache,target=/var/cache/apt/ --mount=type=cache,target=/var/lib/apt/ \
     apt-get update && apt-get install --no-install-recommends --yes \
     wget gnupg2 software-properties-common && \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb && \
+    (wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
     apt-get update && apt-get install --no-install-recommends --yes \
     cuda-toolkit-12-4 && \
-    rm -f cuda-keyring_1.1-1_all.deb
+    rm -f cuda-keyring_1.1-1_all.deb) || \
+    echo "CUDA installation failed - continuing with CPU-only build"
 
 # Create and activate a virtual environment [1].
 # [1] https://docs.astral.sh/uv/concepts/projects/config/#project-environment-path

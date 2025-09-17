@@ -66,11 +66,18 @@ if venv_needs_setup || [ "$INCREMENTAL" = false ]; then
     uv sync --python ${PYTHON_VERSION:-3.11} --resolution ${RESOLUTION_STRATEGY:-highest} --all-extras
     print_info "Installing base requirements..."
     pip install -r requirements.txt -r requirements-dev.txt
+    print_info "Installing raglite in development mode..."
+    pip install -e .
     print_status "Python environment configured"
 else
     print_info "Virtual environment exists, checking for updates..."
     # Quick dependency check without full reinstall
     uv sync --no-install-package raglite || print_warning "Failed to update dependencies"
+    # Ensure raglite is installed in development mode
+    if ! python -c "import raglite" 2>/dev/null; then
+        print_info "Installing raglite in development mode..."
+        pip install -e .
+    fi
     print_status "Python environment updated"
 fi
 
