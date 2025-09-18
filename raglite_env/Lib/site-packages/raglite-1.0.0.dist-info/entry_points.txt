@@ -1,0 +1,2 @@
+[console_scripts]
+raglite = raglite._cli:cli
