@@ -8,7 +8,20 @@
     },
     "overrideCommand": true,
     "remoteUser": "user",
-    "postStartCommand": "sudo chown -R user:user /opt/ && uv sync --python ${localEnv:PYTHON_VERSION:3.10} --resolution ${localEnv:RESOLUTION_STRATEGY:highest} --all-extras && pre-commit install --install-hooks",
+    "containerUser": "user",
+    "updateRemoteUserUID": true,
+    "containerEnv": {
+        "PYTHON_VERSION": "3.11",
+        "RESOLUTION_STRATEGY": "highest",
+        "RAGLITE_DATABASE_URL": "postgresql://raglite_user:raglite_password@postgres:5432/divorce_case",
+        "RAGLITE_DB_TYPE": "postgres",
+        "POSTGRES_HOST": "postgres",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "divorce_case",
+        "POSTGRES_USER": "raglite_user",
+        "POSTGRES_PASSWORD": "raglite_password"
+    },
+    "postStartCommand": "/workspaces/${localWorkspaceFolderBasename}/.devcontainer/setup.sh",
     "customizations": {
         "jetbrains": {
             "backend": "PyCharm",
@@ -41,7 +54,7 @@
                 },
                 "editor.formatOnSave": true,
                 "[python]": {
-                    "editor.defaultFormatter": "charliermarsh.ruff"
+                    "editor.defaultFormatter": "ms-python.python"
                 },
                 "[toml]": {
                     "editor.formatOnSave": false
